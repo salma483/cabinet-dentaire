@@ -68,7 +68,16 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`✅ Serveur démarré sur http://localhost:${PORT}`);
     console.log(`📁 Base de données: ${process.env.DB_NAME || 'dentist_dashboard'}`);
+});
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`❌ Le port ${PORT} est déjà utilisé. Fermez l'autre processus ou définissez un autre port dans PORT.`);
+        process.exit(1);
+    }
+    console.error('Erreur serveur non gérée :', err);
+    process.exit(1);
 });
