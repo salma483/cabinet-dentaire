@@ -1,15 +1,9 @@
-// frontend/src/services/api.js (CRÉER CE FICHIER)
+// frontend/src/services/api.js
 import axios from 'axios';
+import { getBackendUrl } from '../utils/getBackendUrl';
 
-// Configuration automatique selon l'environnement
 const getApiUrl = () => {
-    // Si on est en production (Render)
-    if (process.env.NODE_ENV === 'production') {
-        // Cette URL sera configurée sur Render
-        return process.env.REACT_APP_API_URL || '/api';
-    }
-    // En développement local
-    return 'http://localhost:5000/api';
+    return `${getBackendUrl()}/api`;
 };
 
 const api = axios.create({

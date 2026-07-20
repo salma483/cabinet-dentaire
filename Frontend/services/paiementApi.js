@@ -1,10 +1,12 @@
 // services/paiementApi.js
-const API_URL = 'http://localhost:5000/api';
+import { getBackendUrl } from '../src/utils/getBackendUrl';
+
+const getApiUrl = () => `${getBackendUrl()}/api`;
 
 class PaiementApi {
     static async getAllPaiements() {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements`, {
+        const response = await fetch(`${getApiUrl()}/paiements`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -15,7 +17,7 @@ class PaiementApi {
     
     static async updatePaiement(patientId, data) {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/${patientId}/payment`, {
+        const response = await fetch(`${getApiUrl()}/paiements/${patientId}/payment`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -32,7 +34,7 @@ class PaiementApi {
     
     static async getHistorique(patientId) {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/${patientId}/payment-history`, {
+        const response = await fetch(`${getApiUrl()}/paiements/${patientId}/payment-history`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -43,7 +45,7 @@ class PaiementApi {
     
     static async getAlertes() {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/alertes`, {
+        const response = await fetch(`${getApiUrl()}/paiements/alertes`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -54,7 +56,7 @@ class PaiementApi {
     
     static async marquerAlerteLue(alerteId) {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/alertes/${alerteId}/lire`, {
+        const response = await fetch(`${getApiUrl()}/paiements/alertes/${alerteId}/lire`, {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -65,7 +67,7 @@ class PaiementApi {
     
     static async supprimerAlerte(alerteId) {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/alertes/${alerteId}`, {
+        const response = await fetch(`${getApiUrl()}/paiements/alertes/${alerteId}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -76,7 +78,7 @@ class PaiementApi {
     
     static async getStats() {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${API_URL}/paiements/stats`, {
+        const response = await fetch(`${getApiUrl()}/paiements/stats`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }

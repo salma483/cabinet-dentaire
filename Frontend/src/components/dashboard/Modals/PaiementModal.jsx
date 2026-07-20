@@ -12,6 +12,7 @@ import {
   FaRegCreditCard,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
+import { getBackendUrl } from "../../../utils/getBackendUrl";
 
 const PaiementModal = ({
   showPaiementModal,
@@ -67,7 +68,7 @@ const PaiementModal = ({
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `http://localhost:5000/api/paiements/${patientId}/payment-history`,
+        `${getBackendUrl()}/api/paiements/${patientId}/payment-history`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -199,7 +200,7 @@ const PaiementModal = ({
       console.log("📤 Envoi requête paiement:", requestBody);
 
       const response = await fetch(
-        `http://localhost:5000/api/paiements/${selectedPatientForPaiement.id}/payment`,
+        `${getBackendUrl()}/api/paiements/${selectedPatientForPaiement.id}/payment`,
         {
           method: "PUT",
           headers: {
