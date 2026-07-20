@@ -5,14 +5,13 @@ const getBackendUrl = () => {
     return process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
   }
 
-  // En production, utiliser la même origine (le backend doit être sur le même domaine)
-  // Ou utiliser une variable d'environnement si disponible
+  // En production, utiliser la variable d'environnement si disponible
   if (process.env.REACT_APP_BACKEND_URL) {
     return process.env.REACT_APP_BACKEND_URL;
   }
 
-  // Par défaut en production, utiliser /api (proxy)
-  return `${window.location.protocol}//${window.location.hostname}:${window.location.port || (window.location.protocol === 'https:' ? 443 : 80)}/api`;
+  // Fallback: utiliser le même domaine que le frontend
+  return `${window.location.protocol}//${window.location.hostname}`;
 };
 
 const BACKEND_URL = getBackendUrl();
