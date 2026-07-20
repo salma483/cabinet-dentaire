@@ -17,7 +17,9 @@ const login = async (req, res) => {
         
         console.log(`📧 Email: ${email}`);
 
-        const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+        // PostgreSQL: utiliser result.rows au lieu de [rows]
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const users = result.rows;
         
         console.log(`📊 Résultat SQL: ${users.length} utilisateur(s) trouvé(s)`);
         
@@ -27,7 +29,7 @@ const login = async (req, res) => {
         }
 
         const user = users[0];
-        console.log(`👤 Utilisateur: ${user.full_name}`);
+        console.log(`👤 Utilisateur: ${user.email}`);
         
         // Vérification bcrypt pour tous les mots de passe
         const passwordValid = await bcrypt.compare(password, user.password);
@@ -42,8 +44,7 @@ const login = async (req, res) => {
         const token = jwt.sign(
             { 
                 id: user.id, 
-                email: user.email, 
-                full_name: user.full_name,
+                email: user.email,
                 role: user.role || 'admin'
             },
             process.env.JWT_SECRET || 'secret_key',
@@ -60,7 +61,6 @@ const login = async (req, res) => {
             user: {
                 id: user.id,
                 email: user.email,
-                full_name: user.full_name,
                 role: user.role || 'admin'
             }
         });
@@ -81,7 +81,8 @@ const updateProfile = async (req, res) => {
         const { email, currentPassword, newPassword } = req.body;
 
         // Récupérer l'utilisateur actuel
-        const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
+        const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+        const users = result.rows;
         
         if (users.length === 0) {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
@@ -90,12 +91,13 @@ const updateProfile = async (req, res) => {
         const user = users[0];
         const updates = [];
         const values = [];
+        let paramCount = 1;
 
         // Vérifier et mettre à jour l'email
         if (email && email !== user.email) {
             // Vérifier si le nouvel email n'est pas déjà utilisé
-            const [existingUsers] = await pool.query('SELECT id FROM users WHERE email = ? AND id != ?', [email, userId]);
-            if (existingUsers.length > 0) {
+            const checkResult = await pool.query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, userId]);
+            if (checkResult.rows.length > 0) {
                 return res.status(400).json({ message: 'Cet email est déjà utilisé' });
             }
             updates.push('email = ?');
