@@ -8,20 +8,38 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Configuration CORS - Accepter tous les origins Render + localhost
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
-    process.env.FRONTEND_URL
+    'http://127.0.0.1:3000',
+    'https://cabinet-dentaire-frontend.onrender.com',  // URL Frontend hardcodée
+    process.env.FRONTEND_URL  // Aussi accepter la variable d'env
 ].filter(Boolean);
+
+console.log('✅ Origins CORS autorisés:', allowedOrigins);
 
 app.use(cors({
     origin: function(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Origin not allowed by CORS'));
+        // Si pas d'origin (requêtes sans origin), autoriser
+        if (!origin) {
+            return callback(null, true);
         }
+        
+        // Vérifier si l'origin est dans la liste blanche
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        
+        // Si c'est un domaine Render, l'accepter aussi
+        if (origin.includes('.onrender.com')) {
+            console.log('✅ Origin Render accepté:', origin);
+            return callback(null, true);
+        }
+        
+        console.error('❌ CORS bloqué pour origin:', origin);
+        callback(new Error('Origin not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

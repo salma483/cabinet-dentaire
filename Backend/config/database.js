@@ -1,17 +1,17 @@
 // backend/config/database.js
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-// Configuration de la connexion MySQL
-const pool = mysql.createPool({
+// Configuration de la connexion PostgreSQL
+const pool = new Pool({
     host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
+    user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'dentist_dashboard',
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
+    port: process.env.DB_PORT || 5432,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
     ssl: process.env.DB_SSL === 'true' ? {
         rejectUnauthorized: false
     } : false
@@ -20,10 +20,10 @@ const pool = mysql.createPool({
 // Tester la connexion sans faire planter le serveur
 (async () => {
     try {
-        const connection = await pool.getConnection();
-        console.log('✅ Base de données connectée avec succès');
+        const client = await pool.connect();
+        console.log('✅ Base de données PostgreSQL connectée avec succès');
         console.log(`📁 Base: ${process.env.DB_NAME || 'dentist_dashboard'}`);
-        connection.release();
+        client.release();
     } catch (error) {
         console.error('⚠️ Base de données indisponible au démarrage:');
         console.error(`   ${error.message}`);
