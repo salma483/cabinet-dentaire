@@ -5,28 +5,23 @@ class PaiementController {
     // Récupérer les paiements de tous les patients
     static async getAllPaiements(req, res) {
         try {
-            const [paiements] = await pool.query(
+            const result = await pool.query(
                 `SELECT 
                     p.id,
                     p.full_name,
                     p.birth_date,
                     p.phone,
                     p.address,
-                    COALESCE(pai.montant_total, 0) as montant_total,
-                    COALESCE(pai.montant_paye, 0) as montant_paye,
-                    COALESCE(pai.montant_restant, 0) as montant_restant,
-                    COALESCE(pai.statut, 'non_paye') as paiement_status,
-                    COALESCE(pai.type_paiement, 'espece') as type_paiement,
-                    pai.cheque_info,
-                    pai.notes,
-                    pai.date_dernier_paiement,
+                    p.montant_total,
+                    p.montant_paye,
+                    p.montant_restant,
+                    p.paiement_status,
                     p.created_at
                 FROM patients p
-                LEFT JOIN paiements pai ON p.id = pai.patient_id
                 ORDER BY p.created_at DESC`
             );
             
-            const formattedPaiements = paiements.map(p => {
+            const formattedPaiements = result.rows.map(p => {
                 let age = null;
                 if (p.birth_date) {
                     const today = new Date();
@@ -35,15 +30,6 @@ class PaiementController {
                     const monthDiff = today.getMonth() - birthDate.getMonth();
                     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
                         age--;
-                    }
-                }
-                
-                let chequeInfo = null;
-                if (p.cheque_info) {
-                    try {
-                        chequeInfo = typeof p.cheque_info === 'string' ? JSON.parse(p.cheque_info) : p.cheque_info;
-                    } catch(e) {
-                        chequeInfo = null;
                     }
                 }
                 
@@ -58,11 +44,7 @@ class PaiementController {
                     montant_total: parseFloat(p.montant_total) || 0,
                     montant_paye: parseFloat(p.montant_paye) || 0,
                     montant_restant: parseFloat(p.montant_restant) || 0,
-                    paiement_status: p.paiement_status || 'non_paye',
-                    type_paiement: p.type_paiement || 'espece',
-                    cheque_info: chequeInfo,
-                    notes: p.notes,
-                    date_dernier_paiement: p.date_dernier_paiement
+                    paiement_status: p.paiement_status || 'non_paye'
                 };
             });
             
@@ -81,43 +63,24 @@ class PaiementController {
         
         try {
             const { id } = req.params;
-            const { montant_total, montant_paye, notes, type_paiement, cheque_info } = req.body;
+            const { montant_total, montant_paye, notes } = req.body;
             
             const userId = req.user?.full_name || req.user?.username || 'Admin';
             
-            const [patients] = await pool.query('SELECT * FROM patients WHERE id = ?', [id]);
+            const patientsResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
             
-            if (patients.length === 0) {
+            if (patientsResult.rows.length === 0) {
                 return res.status(404).json({ error: 'Patient non trouvé' });
             }
             
-            const patient = patients[0];
-            const finalTypePaiement = type_paiement || 'espece';
+            const patient = patientsResult.rows[0];
             
-            let [paiements] = await pool.query('SELECT * FROM paiements WHERE patient_id = ?', [id]);
-            let paiementId;
-            
-            if (paiements.length === 0) {
-                const [result] = await pool.query(
-                    'INSERT INTO paiements (patient_id, montant_total, montant_paye, montant_restant, statut, type_paiement) VALUES (?, 0, 0, 0, "non_paye", ?)',
-                    [id, finalTypePaiement]
-                );
-                paiementId = result.insertId;
-                [paiements] = await pool.query('SELECT * FROM paiements WHERE id = ?', [paiementId]);
-            }
-            
-            const paiement = paiements[0];
-            const ancienMontantTotal = parseFloat(paiement.montant_total) || 0;
-            const ancienMontantPaye = parseFloat(paiement.montant_paye) || 0;
-            const ancienTypePaiement = paiement.type_paiement || 'espece';
-            const ancienChequeInfo = paiement.cheque_info;
+            const ancienMontantTotal = parseFloat(patient.montant_total) || 0;
+            const ancienMontantPaye = parseFloat(patient.montant_paye) || 0;
             
             const nouveauMontantTotal = montant_total !== undefined ? parseFloat(montant_total) : ancienMontantTotal;
             const nouveauMontantPaye = montant_paye !== undefined ? parseFloat(montant_paye) : ancienMontantPaye;
             const nouveauMontantRestant = nouveauMontantTotal - nouveauMontantPaye;
-            const nouveauTypePaiement = finalTypePaiement;
-            
-            let nouveauChequeInfo = cheque_info ? JSON.stringify(cheque_info) : null;
             
             let nouveauStatut = 'non_paye';
             if (nouveauMontantTotal === 0) {
@@ -129,25 +92,18 @@ class PaiementController {
             }
             
             await pool.query(
-                `UPDATE paiements SET 
-                    montant_total = ?,
-                    montant_paye = ?,
-                    montant_restant = ?,
-                    statut = ?,
-                    type_paiement = ?,
-                    cheque_info = ?,
-                    date_dernier_paiement = CASE WHEN ? > 0 THEN NOW() ELSE date_dernier_paiement END,
-                    notes = COALESCE(?, notes)
-                WHERE patient_id = ?`,
+                `UPDATE patients SET 
+                    montant_total = $1,
+                    montant_paye = $2,
+                    montant_restant = $3,
+                    paiement_status = $4,
+                    updated_at = NOW()
+                WHERE id = $5`,
                 [
                     nouveauMontantTotal,
                     nouveauMontantPaye,
                     Math.max(0, nouveauMontantRestant),
                     nouveauStatut,
-                    nouveauTypePaiement,
-                    nouveauChequeInfo,
-                    nouveauMontantPaye - ancienMontantPaye,
-                    notes,
                     id
                 ]
             );
@@ -157,10 +113,8 @@ class PaiementController {
                 `INSERT INTO paiement_historique 
                 (patient_id, montant_total_avant, montant_total_apres, 
                  montant_paye_avant, montant_paye_apres, montant_restant_avant, 
-                 montant_restant_apres, statut_avant, statut_apres, 
-                 type_paiement_avant, type_paiement_apres, cheque_info_avant, cheque_info_apres,
-                 notes, user_action, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+                 montant_restant_apres, statut_avant, statut_apres, notes, user_action)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
                 [
                     id,
                     ancienMontantTotal,
@@ -169,62 +123,29 @@ class PaiementController {
                     nouveauMontantPaye,
                     ancienMontantTotal - ancienMontantPaye,
                     Math.max(0, nouveauMontantRestant),
-                    paiement.statut,
+                    patient.paiement_status,
                     nouveauStatut,
-                    ancienTypePaiement,
-                    nouveauTypePaiement,
-                    ancienChequeInfo ? JSON.stringify(ancienChequeInfo) : null,
-                    nouveauChequeInfo,
                     notes,
                     userId
                 ]
             );
             
-            let notification = null;
-            let typeInfo = '';
-            
-            if (finalTypePaiement === 'espece') {
-                typeInfo = '💰 Paiement en espèces';
-            } else if (finalTypePaiement === 'cheque') {
-                typeInfo = '📝 Paiement par chèque';
-                if (cheque_info && cheque_info.numero) {
-                    typeInfo += ` (N°: ${cheque_info.numero})`;
-                }
-            }
-            
-            if (nouveauStatut === 'paye') {
-                notification = {
-                    type: 'success',
-                    title: '✅ Paiement complété',
-                    message: `${patient.full_name} a complété son paiement.\n${typeInfo}\nTotal: ${nouveauMontantTotal.toFixed(2)} DT`
-                };
-            } else if (nouveauStatut === 'semi_paye') {
-                notification = {
-                    type: 'warning',
-                    title: '⚠️ Paiement partiel',
-                    message: `${patient.full_name} a un reste à payer de ${Math.max(0, nouveauMontantRestant).toFixed(2)} DT sur ${nouveauMontantTotal.toFixed(2)} DT\n${typeInfo}`,
-                    patient_id: parseInt(id),
-                    patient_name: patient.full_name,
-                    phone: patient.phone,
-                    address: patient.address
-                };
-            }
+            // Récupérer le patient mis à jour
+            const updatedResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
+            const updated = updatedResult.rows[0];
             
             res.json({
                 success: true,
                 message: 'Paiement mis à jour avec succès',
                 patient: {
-                    id: parseInt(id),
-                    montant_total: nouveauMontantTotal,
-                    montant_paye: nouveauMontantPaye,
-                    montant_restant: Math.max(0, nouveauMontantRestant),
-                    paiement_status: nouveauStatut,
-                    type_paiement: nouveauTypePaiement,
-                    cheque_info: cheque_info
-                },
-                notification: notification
+                    id: updated.id,
+                    full_name: updated.full_name,
+                    montant_total: parseFloat(updated.montant_total),
+                    montant_paye: parseFloat(updated.montant_paye),
+                    montant_restant: parseFloat(updated.montant_restant),
+                    paiement_status: updated.paiement_status
+                }
             });
-            
         } catch (error) {
             console.error('Erreur updatePaiement:', error);
             res.status(500).json({ error: error.message });
@@ -238,29 +159,16 @@ class PaiementController {
         
         try {
             const { id } = req.params;
-            const [historique] = await pool.query(
-                `SELECT 
-                    ph.*,
-                    p.full_name as patient_name,
-                    p.phone as patient_phone,
-                    p.address as patient_address
-                FROM paiement_historique ph
-                LEFT JOIN patients p ON ph.patient_id = p.id
-                WHERE ph.patient_id = ? 
-                ORDER BY ph.created_at DESC`,
+            const historiqueResult = await pool.query(
+                `SELECT *
+                FROM paiement_historique
+                WHERE patient_id = $1 
+                ORDER BY created_at DESC`,
                 [id]
             );
+            const historique = historiqueResult.rows;
             
-            // Formater les données JSON
-            const formattedHistorique = historique.map(h => ({
-                ...h,
-                cheque_info_avant: h.cheque_info_avant ? 
-                    (typeof h.cheque_info_avant === 'string' ? JSON.parse(h.cheque_info_avant) : h.cheque_info_avant) : null,
-                cheque_info_apres: h.cheque_info_apres ? 
-                    (typeof h.cheque_info_apres === 'string' ? JSON.parse(h.cheque_info_apres) : h.cheque_info_apres) : null
-            }));
-            
-            res.json(formattedHistorique || []);
+            res.json(historique || []);
         } catch (error) {
             console.error('Erreur getHistoriquePaiements:', error);
             res.json([]);
@@ -272,68 +180,14 @@ class PaiementController {
         console.log('=== GET ALL HISTORIQUE PAIEMENTS ===');
         
         try {
-            const [historique] = await pool.query(`
-                SELECT 
-                    ph.*,
-                    p.full_name as patient_name,
-                    p.phone as patient_phone,
-                    p.address as patient_address
-                FROM paiement_historique ph
-                LEFT JOIN patients p ON ph.patient_id = p.id
-                ORDER BY ph.created_at DESC
+            const historiqueResult = await pool.query(`
+                SELECT *
+                FROM paiement_historique
+                ORDER BY created_at DESC
             `);
+            const historique = historiqueResult.rows;
             
-            // Formater correctement les données JSON
-            const formattedHistorique = historique.map(h => {
-                // Formater cheque_info_avant
-                let chequeInfoAvant = null;
-                if (h.cheque_info_avant) {
-                    try {
-                        chequeInfoAvant = typeof h.cheque_info_avant === 'string' 
-                            ? JSON.parse(h.cheque_info_avant) 
-                            : h.cheque_info_avant;
-                    } catch(e) {
-                        chequeInfoAvant = null;
-                    }
-                }
-                
-                // Formater cheque_info_apres
-                let chequeInfoApres = null;
-                if (h.cheque_info_apres) {
-                    try {
-                        chequeInfoApres = typeof h.cheque_info_apres === 'string' 
-                            ? JSON.parse(h.cheque_info_apres) 
-                            : h.cheque_info_apres;
-                    } catch(e) {
-                        chequeInfoApres = null;
-                    }
-                }
-                
-                return {
-                    id: h.id,
-                    patient_id: h.patient_id,
-                    patient_name: h.patient_name,
-                    patient_phone: h.patient_phone,
-                    patient_address: h.patient_address,
-                    montant_total_avant: parseFloat(h.montant_total_avant) || 0,
-                    montant_total_apres: parseFloat(h.montant_total_apres) || 0,
-                    montant_paye_avant: parseFloat(h.montant_paye_avant) || 0,
-                    montant_paye_apres: parseFloat(h.montant_paye_apres) || 0,
-                    montant_restant_avant: parseFloat(h.montant_restant_avant) || 0,
-                    montant_restant_apres: parseFloat(h.montant_restant_apres) || 0,
-                    statut_avant: h.statut_avant,
-                    statut_apres: h.statut_apres,
-                    type_paiement_avant: h.type_paiement_avant,
-                    type_paiement_apres: h.type_paiement_apres,
-                    cheque_info_avant: chequeInfoAvant,
-                    cheque_info_apres: chequeInfoApres,
-                    notes: h.notes,
-                    user_action: h.user_action,
-                    created_at: h.created_at
-                };
-            });
-            
-            res.json(formattedHistorique);
+            res.json(historique);
         } catch (error) {
             console.error('Erreur getAllHistoriquePaiements:', error);
             res.status(500).json({ error: error.message });
@@ -343,43 +197,28 @@ class PaiementController {
     // Statistiques des paiements
     static async getStatsPaiements(req, res) {
         try {
-            const [stats] = await pool.query(`
+            const result = await pool.query(`
                 SELECT 
-                    COUNT(DISTINCT patient_id) as total_patients_avec_paiement,
+                    COUNT(*) as total_patients_avec_paiement,
                     COALESCE(SUM(montant_total), 0) as total_montant,
                     COALESCE(SUM(montant_paye), 0) as total_paye,
                     COALESCE(SUM(montant_restant), 0) as total_restant,
-                    COUNT(CASE WHEN statut = 'paye' THEN 1 END) as paye_count,
-                    COUNT(CASE WHEN statut = 'semi_paye' THEN 1 END) as semi_paye_count,
-                    COUNT(CASE WHEN statut = 'non_paye' AND montant_total > 0 THEN 1 END) as non_paye_count
-                FROM paiements
+                    COUNT(CASE WHEN paiement_status = 'paye' THEN 1 END) as paye_count,
+                    COUNT(CASE WHEN paiement_status = 'semi_paye' THEN 1 END) as semi_paye_count,
+                    COUNT(CASE WHEN paiement_status = 'non_paye' AND montant_total > 0 THEN 1 END) as non_paye_count
+                FROM patients
             `);
-            res.json(stats[0] || {});
+            res.json(result.rows[0] || {});
         } catch (error) {
             console.error('Erreur getStatsPaiements:', error);
             res.status(500).json({ error: error.message });
         }
     }
     
-    // ============ MÉTHODES POUR LES ALERTES ============
-    
     // Récupérer toutes les alertes actives
     static async getAlertesActives(req, res) {
         try {
-            // Vérifier si la table alertes_paiement existe
-            const [tables] = await pool.query(`
-                SELECT COUNT(*) as count 
-                FROM information_schema.tables 
-                WHERE table_schema = DATABASE() 
-                AND table_name = 'alertes_paiement'
-            `);
-            
-            if (tables[0].count === 0) {
-                console.log('Table alertes_paiement n\'existe pas encore');
-                return res.json([]);
-            }
-            
-            const [alertes] = await pool.query(`
+            const result = await pool.query(`
                 SELECT 
                     a.*,
                     p.full_name as patient_name,
@@ -390,10 +229,9 @@ class PaiementController {
                 WHERE a.status = 'active'
                 ORDER BY a.date_alerte DESC
             `);
-            res.json(alertes || []);
+            res.json(result.rows || []);
         } catch (error) {
             console.error('Erreur getAlertesActives:', error);
-            // Si la table n'existe pas, retourner un tableau vide
             res.json([]);
         }
     }
@@ -403,8 +241,8 @@ class PaiementController {
         try {
             const { id } = req.params;
             await pool.query(
-                'UPDATE alertes_paiement SET status = "lue", date_lecture = NOW() WHERE id = ?',
-                [id]
+                'UPDATE alertes_paiement SET status = $1, date_lecture = NOW() WHERE id = $2',
+                ['lue', id]
             );
             res.json({ success: true, message: 'Alerte marquée comme lue' });
         } catch (error) {
@@ -417,7 +255,7 @@ class PaiementController {
     static async supprimerAlerte(req, res) {
         try {
             const { id } = req.params;
-            await pool.query('UPDATE alertes_paiement SET status = "ignoree" WHERE id = ?', [id]);
+            await pool.query('UPDATE alertes_paiement SET status = $1 WHERE id = $2', ['ignoree', id]);
             res.json({ success: true, message: 'Alerte supprimée' });
         } catch (error) {
             console.error('Erreur supprimerAlerte:', error);

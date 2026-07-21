@@ -4,14 +4,10 @@ const pool = require('../config/database');
 // Récupérer tous les médicaments
 const getAllMedicaments = async (req, res) => {
     try {
-        const [medicaments] = await pool.query(`
-            SELECT 
-                m.*,
-                (SELECT COUNT(*) FROM stock_mouvements WHERE medicament_id = m.id) as nb_mouvements
-            FROM medicaments m 
-            ORDER BY m.created_at DESC
+        const result = await pool.query(`
+            SELECT * FROM medicaments ORDER BY created_at DESC
         `);
-        res.json(medicaments);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur:', error);
         res.status(500).json({ message: 'Erreur serveur', error: error.message });
@@ -22,13 +18,13 @@ const getAllMedicaments = async (req, res) => {
 const getMedicamentById = async (req, res) => {
     try {
         const { id } = req.params;
-        const [medicaments] = await pool.query('SELECT * FROM medicaments WHERE id = ?', [id]);
+        const result = await pool.query('SELECT * FROM medicaments WHERE id = $1', [id]);
         
-        if (medicaments.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ message: 'Médicament non trouvé' });
         }
         
-        res.json(medicaments[0]);
+        res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur:', error);
         res.status(500).json({ message: 'Erreur serveur' });
@@ -40,48 +36,26 @@ const addMedicament = async (req, res) => {
     try {
         const {
             nom,
-            prix_unitaire,
-            quantite_achetee,
-            quantite_disponible,
+            prix,
+            stock = 0,
             description,
-            fournisseur,
-            date_expiration,
-            alerte_stock = 5
+            dosage
         } = req.body;
 
-        // Validation
-        if (!nom || !prix_unitaire) {
-            return res.status(400).json({ message: 'Le nom et le prix unitaire sont requis' });
+        if (!nom || !prix) {
+            return res.status(400).json({ message: 'Le nom et le prix sont requis' });
         }
 
-        // Calculer le statut
-        let statut = 'disponible';
-        if (quantite_disponible === 0) {
-            statut = 'rupture';
-        } else if (quantite_disponible <= alerte_stock) {
-            statut = 'stock_faible';
-        }
+        const result = await pool.query(`
+            INSERT INTO medicaments (nom, prix, stock, description, dosage)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+        `, [nom, prix, stock, description || null, dosage || null]);
 
-        const [result] = await pool.query(`
-            INSERT INTO medicaments 
-            (nom, prix_unitaire, quantite_achetee, quantite_disponible, statut, description, fournisseur, date_expiration, alerte_stock)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [nom, prix_unitaire, quantite_achetee || 0, quantite_disponible || 0, statut, description, fournisseur, date_expiration, alerte_stock]);
-
-        // Ajouter au stock mouvement
-        if (quantite_achetee > 0) {
-            await pool.query(`
-                INSERT INTO stock_mouvements (medicament_id, type_mouvement, quantite, raison)
-                VALUES (?, 'entree', ?, 'Achat initial')
-            `, [result.insertId, quantite_achetee]);
-        }
-
-        const [newMedicament] = await pool.query('SELECT * FROM medicaments WHERE id = ?', [result.insertId]);
-        
         res.status(201).json({
             success: true,
             message: 'Médicament ajouté avec succès',
-            medicament: newMedicament[0]
+            medicament: result.rows[0]
         });
     } catch (error) {
         console.error('Erreur:', error);
@@ -105,10 +79,11 @@ const updateMedicament = async (req, res) => {
         } = req.body;
 
         // Récupérer l'ancienne quantité pour calculer la différence
-        const [oldData] = await pool.query('SELECT quantite_disponible FROM medicaments WHERE id = ?', [id]);
-        if (oldData.length === 0) {
+        const oldDataResult = await pool.query('SELECT quantite_disponible FROM medicaments WHERE id = $1', [id]);
+        if (oldDataResult.rows.length === 0) {
             return res.status(404).json({ message: 'Médicament non trouvé' });
         }
+        const oldData = oldDataResult.rows;
 
         // Calculer le statut
         let statut = 'disponible';
@@ -120,9 +95,9 @@ const updateMedicament = async (req, res) => {
 
         await pool.query(`
             UPDATE medicaments 
-            SET nom = ?, prix_unitaire = ?, quantite_achetee = ?, quantite_disponible = ?,
-                statut = ?, description = ?, fournisseur = ?, date_expiration = ?, alerte_stock = ?
-            WHERE id = ?
+            SET nom = $1, prix_unitaire = $2, quantite_achetee = $3, quantite_disponible = $4,
+                statut = $5, description = $6, fournisseur = $7, date_expiration = $8, alerte_stock = $9
+            WHERE id = $10
         `, [nom, prix_unitaire, quantite_achetee, quantite_disponible, statut, description, fournisseur, date_expiration, alerte_stock, id]);
 
         // Ajouter mouvement si quantité changée
@@ -131,16 +106,16 @@ const updateMedicament = async (req, res) => {
             const typeMouvement = quantiteDiff > 0 ? 'entree' : 'sortie';
             await pool.query(`
                 INSERT INTO stock_mouvements (medicament_id, type_mouvement, quantite, raison)
-                VALUES (?, ?, ?, 'Mise à jour manuelle')
+                VALUES ($1, $2, $3, 'Mise à jour manuelle')
             `, [id, typeMouvement, Math.abs(quantiteDiff)]);
         }
 
-        const [updatedMedicament] = await pool.query('SELECT * FROM medicaments WHERE id = ?', [id]);
+        const updatedMedicamentResult = await pool.query('SELECT * FROM medicaments WHERE id = $1', [id]);
         
         res.json({
             success: true,
             message: 'Médicament mis à jour',
-            medicament: updatedMedicament[0]
+            medicament: updatedMedicamentResult.rows[0]
         });
     } catch (error) {
         console.error('Erreur:', error);
@@ -154,8 +129,8 @@ const deleteMedicament = async (req, res) => {
         const { id } = req.params;
         
         // Supprimer d'abord les mouvements associés
-        await pool.query('DELETE FROM stock_mouvements WHERE medicament_id = ?', [id]);
-        await pool.query('DELETE FROM medicaments WHERE id = ?', [id]);
+        await pool.query('DELETE FROM stock_mouvements WHERE medicament_id = $1', [id]);
+        await pool.query('DELETE FROM medicaments WHERE id = $1', [id]);
         
         res.json({ success: true, message: 'Médicament supprimé' });
     } catch (error) {
@@ -175,7 +150,8 @@ const updateStock = async (req, res) => {
         }
 
         // Récupérer le médicament
-        const [medicaments] = await pool.query('SELECT * FROM medicaments WHERE id = ?', [id]);
+        const medicamentsResult = await pool.query('SELECT * FROM medicaments WHERE id = $1', [id]);
+        const medicaments = medicamentsResult.rows;
         if (medicaments.length === 0) {
             return res.status(404).json({ message: 'Médicament non trouvé' });
         }
@@ -188,15 +164,15 @@ const updateStock = async (req, res) => {
             nouvelleQuantite += quantite;
             await pool.query(`
                 UPDATE medicaments 
-                SET quantite_disponible = ?, quantite_achetee = quantite_achetee + ?
-                WHERE id = ?
+                SET quantite_disponible = $1, quantite_achetee = quantite_achetee + $2
+                WHERE id = $3
             `, [nouvelleQuantite, quantite, id]);
         } else if (type === 'sortie') {
             if (quantite > medicament.quantite_disponible) {
                 return res.status(400).json({ message: 'Stock insuffisant' });
             }
             nouvelleQuantite -= quantite;
-            await pool.query('UPDATE medicaments SET quantite_disponible = ? WHERE id = ?', [nouvelleQuantite, id]);
+            await pool.query('UPDATE medicaments SET quantite_disponible = $1 WHERE id = $2', [nouvelleQuantite, id]);
         } else {
             return res.status(400).json({ message: 'Type de mouvement invalide' });
         }
@@ -204,8 +180,8 @@ const updateStock = async (req, res) => {
         // Ajouter au mouvement
         await pool.query(`
             INSERT INTO stock_mouvements (medicament_id, type_mouvement, quantite, raison)
-            VALUES (?, ?, ?, ?)
-        `, [id, typeMouvement, quantite, raison || (type === 'entree' ? 'Entrée stock' : 'Sortie stock')]);
+            VALUES ($1, $2, $3, $4)
+        `, [id, typeMouvement, quantite, raison || 'Ajustement manuel']);
 
         // Mettre à jour le statut
         let statut = 'disponible';
@@ -214,7 +190,7 @@ const updateStock = async (req, res) => {
         } else if (nouvelleQuantite <= medicament.alerte_stock) {
             statut = 'stock_faible';
         }
-        await pool.query('UPDATE medicaments SET statut = ? WHERE id = ?', [statut, id]);
+        await pool.query('UPDATE medicaments SET statut = $1 WHERE id = $2', [statut, id]);
 
         res.json({
             success: true,
@@ -231,7 +207,7 @@ const updateStock = async (req, res) => {
 // Récupérer les statistiques
 const getStats = async (req, res) => {
     try {
-        const [stats] = await pool.query(`
+        const statsResult = await pool.query(`
             SELECT 
                 COUNT(*) as total_medicaments,
                 SUM(CASE WHEN statut = 'disponible' THEN 1 ELSE 0 END) as disponibles,
@@ -242,7 +218,7 @@ const getStats = async (req, res) => {
             FROM medicaments
         `);
         
-        res.json(stats[0]);
+        res.json(statsResult.rows[0]);
     } catch (error) {
         console.error('Erreur:', error);
         res.status(500).json({ message: 'Erreur serveur' });
@@ -253,13 +229,14 @@ const getStats = async (req, res) => {
 const getMouvements = async (req, res) => {
     try {
         const { id } = req.params;
-        const [mouvements] = await pool.query(`
+        const mouvementsResult = await pool.query(`
             SELECT sm.*, m.nom as medicament_nom
             FROM stock_mouvements sm
             JOIN medicaments m ON sm.medicament_id = m.id
-            WHERE sm.medicament_id = ?
+            WHERE sm.medicament_id = $1
             ORDER BY sm.date_mouvement DESC
         `, [id]);
+        const mouvements = mouvementsResult.rows;
         
         res.json(mouvements);
     } catch (error) {

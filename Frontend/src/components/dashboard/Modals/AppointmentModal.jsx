@@ -1,9 +1,39 @@
-// src/components/dashboard/Modals/AppointmentModal.jsx
-import React from 'react';
+// AppointmentModal.jsx - Version corrigée avec React.memo
+import React, { memo } from 'react';
 
-const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAppointment, setNewAppointment, patients, handleAddAppointment }) => {
+const AppointmentModal = memo(({ 
+  showAppointmentModal, 
+  setShowAppointmentModal, 
+  newAppointment, 
+  setNewAppointment, 
+  patients, 
+  handleAddAppointment 
+}) => {
   if (!showAppointmentModal) return null;
-  
+
+  // ⭐ CORRECTION : Handlers locaux stabilisés
+  const handlePatientNameChange = (e) => {
+    setNewAppointment(prev => ({ ...prev, patient_name: e.target.value }));
+  };
+
+  const handleDateChange = (e) => {
+    setNewAppointment(prev => ({ ...prev, appointment_date: e.target.value }));
+  };
+
+  const handleTimeChange = (e) => {
+    setNewAppointment(prev => ({ ...prev, appointment_time: e.target.value }));
+  };
+
+  const handleTypeChange = (e) => {
+    setNewAppointment(prev => ({ ...prev, type: e.target.value }));
+  };
+
+  const handleNotesChange = (e) => {
+    setNewAppointment(prev => ({ ...prev, notes: e.target.value }));
+  };
+
+  const handleClose = () => setShowAppointmentModal(false);
+
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
       <div style={{ background: 'white', borderRadius: '15px', width: '500px', maxWidth: '90%', padding: '25px' }}>
@@ -16,8 +46,8 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
             type="text" 
             placeholder="Sélectionner ou écrire le nom" 
             style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
-            value={newAppointment.patient_name} 
-            onChange={(e) => setNewAppointment({ ...newAppointment, patient_name: e.target.value })} 
+            value={newAppointment.patient_name || ''} 
+            onChange={handlePatientNameChange}
             autoFocus
           />
           <datalist id="patientNames">
@@ -31,8 +61,8 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
             <input 
               type="date" 
               style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
-              value={newAppointment.appointment_date} 
-              onChange={(e) => setNewAppointment({ ...newAppointment, appointment_date: e.target.value })} 
+              value={newAppointment.appointment_date || ''} 
+              onChange={handleDateChange}
             />
           </div>
           <div>
@@ -40,8 +70,8 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
             <input 
               type="time" 
               style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
-              value={newAppointment.appointment_time} 
-              onChange={(e) => setNewAppointment({ ...newAppointment, appointment_time: e.target.value })} 
+              value={newAppointment.appointment_time || ''} 
+              onChange={handleTimeChange}
             />
           </div>
         </div>
@@ -50,8 +80,8 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
           <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>Type de visite</label>
           <select 
             style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
-            value={newAppointment.type} 
-            onChange={(e) => setNewAppointment({ ...newAppointment, type: e.target.value })}
+            value={newAppointment.type || 'Consultation'} 
+            onChange={handleTypeChange}
           >
             <option value="Consultation">Consultation</option>
             <option value="Urgence">Urgence</option>
@@ -66,12 +96,12 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
           placeholder="Notes (optionnel)" 
           rows="2" 
           style={{ width: '100%', padding: '10px', marginBottom: '20px', borderRadius: '8px', border: '1px solid #ddd' }}
-          value={newAppointment.notes} 
-          onChange={(e) => setNewAppointment({ ...newAppointment, notes: e.target.value })} 
+          value={newAppointment.notes || ''} 
+          onChange={handleNotesChange}
         />
         
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-          <button onClick={() => setShowAppointmentModal(false)} style={{ padding: '10px 20px', background: '#6c757d', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+          <button onClick={handleClose} style={{ padding: '10px 20px', background: '#6c757d', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
             Annuler
           </button>
           <button onClick={handleAddAppointment} style={{ padding: '10px 20px', background: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
@@ -81,6 +111,8 @@ const AppointmentModal = ({ showAppointmentModal, setShowAppointmentModal, newAp
       </div>
     </div>
   );
-};
+});
+
+AppointmentModal.displayName = 'AppointmentModal';
 
 export default AppointmentModal;

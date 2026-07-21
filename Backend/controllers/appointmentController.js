@@ -3,10 +3,10 @@ const pool = require('../config/database');
 // Obtenir tous les rendez-vous
 const getAllAppointments = async (req, res) => {
     try {
-        const [appointments] = await pool.query(
+        const result = await pool.query(
             'SELECT * FROM appointments ORDER BY appointment_date ASC, appointment_time ASC'
         );
-        res.json(appointments);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur getAllAppointments:', error);
         res.status(500).json({ message: error.message });
@@ -16,10 +16,10 @@ const getAllAppointments = async (req, res) => {
 // Obtenir les rendez-vous du jour
 const getTodayAppointments = async (req, res) => {
     try {
-        const [appointments] = await pool.query(
-            'SELECT * FROM appointments WHERE appointment_date = CURDATE() ORDER BY appointment_time ASC'
+        const result = await pool.query(
+            'SELECT * FROM appointments WHERE DATE(appointment_date) = CURRENT_DATE ORDER BY appointment_time ASC'
         );
-        res.json(appointments);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur getTodayAppointments:', error);
         res.status(500).json({ message: error.message });
@@ -30,16 +30,16 @@ const getTodayAppointments = async (req, res) => {
 const getAppointmentById = async (req, res) => {
     try {
         const { id } = req.params;
-        const [appointments] = await pool.query(
-            'SELECT * FROM appointments WHERE id = ?',
+        const result = await pool.query(
+            'SELECT * FROM appointments WHERE id = $1',
             [id]
         );
         
-        if (appointments.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ message: 'Rendez-vous non trouvé' });
         }
         
-        res.json(appointments[0]);
+        res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur getAppointmentById:', error);
         res.status(500).json({ message: error.message });
@@ -60,16 +60,17 @@ const addAppointment = async (req, res) => {
             });
         }
         
-        const [result] = await pool.query(
+        const result = await pool.query(
             `INSERT INTO appointments 
             (patient_id, patient_name, appointment_date, appointment_time, type, notes) 
-            VALUES (?, ?, ?, ?, ?, ?)`,
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id`,
             [patient_id || null, patient_name, appointment_date, appointment_time, type || 'Consultation', notes || null]
         );
         
         res.status(201).json({ 
             message: 'Rendez-vous ajouté avec succès', 
-            id: result.insertId 
+            id: result.rows[0].id 
         });
     } catch (error) {
         console.error('Erreur addAppointment:', error);
@@ -83,14 +84,14 @@ const updateAppointment = async (req, res) => {
         const { id } = req.params;
         const { appointment_date, appointment_time, type, status, notes } = req.body;
         
-        const [result] = await pool.query(
+        const result = await pool.query(
             `UPDATE appointments 
-            SET appointment_date = ?, appointment_time = ?, type = ?, status = ?, notes = ? 
-            WHERE id = ?`,
+            SET appointment_date = $1, appointment_time = $2, type = $3, status = $4, notes = $5 
+            WHERE id = $6`,
             [appointment_date, appointment_time, type, status, notes, id]
         );
         
-        if (result.affectedRows === 0) {
+        if (result.rowCount === 0) {
             return res.status(404).json({ message: 'Rendez-vous non trouvé' });
         }
         
@@ -106,9 +107,9 @@ const deleteAppointment = async (req, res) => {
     try {
         const { id } = req.params;
         
-        const [result] = await pool.query('DELETE FROM appointments WHERE id = ?', [id]);
+        const result = await pool.query('DELETE FROM appointments WHERE id = $1', [id]);
         
-        if (result.affectedRows === 0) {
+        if (result.rowCount === 0) {
             return res.status(404).json({ message: 'Rendez-vous non trouvé' });
         }
         
