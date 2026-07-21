@@ -449,17 +449,18 @@ const Dashboard = () => {
       case "patients":
         return (
           <PatientsList
-            patients={patients}
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            setShowAddModal={setShowAddModal}
-            handleOpenRadiographies={handleOpenRadiographies}
-            setNewAppointment={setNewAppointment}
-            setShowAppointmentModal={setShowAppointmentModal}
-            handleDeletePatient={handleDeletePatient}
-            setSelectedPatientForPaiement={setSelectedPatientForPaiement}
-            setShowPaiementModal={setShowPaiementModal}
-          />
+  patients={patients}
+  searchTerm={searchTerm}
+  setSearchTerm={setSearchTerm}
+  setShowAddModal={setShowAddModal}
+  handleOpenRadiographies={handleOpenRadiographies}
+  setNewAppointment={setNewAppointment}
+  setShowAppointmentModal={setShowAppointmentModal}
+  handleDeletePatient={handleDeletePatient}
+  setSelectedPatientForPaiement={setSelectedPatientForPaiement}
+  setShowPaiementModal={setShowPaiementModal}
+  refreshPatients={fetchPatients}
+/>
         );
       case "consultations":
         return <ConsultationsSection patients={patients} />;

@@ -1,7 +1,7 @@
-// PatientsList.jsx - VERSION AVEC ADRESSE
-
-import React from 'react';
-import { FaPlus, FaSearch, FaXRay, FaCalendarAlt, FaTrash } from 'react-icons/fa';
+// frontend/src/components/dashboard/PatientsList.jsx
+import React, { useState } from 'react';
+import { FaPlus, FaSearch, FaXRay, FaCalendarAlt, FaTrash, FaFileExcel } from 'react-icons/fa';
+import ImportExcelModal from './Modals/ImportExcelModal';
 
 const PatientsList = ({ 
   patients, 
@@ -13,8 +13,16 @@ const PatientsList = ({
   setShowAppointmentModal, 
   handleDeletePatient,
   setSelectedPatientForPaiement,
-  setShowPaiementModal
+  setShowPaiementModal,
+  refreshPatients
 }) => {
+  const [showImportModal, setShowImportModal] = useState(false);
+
+  const handleImportSuccess = () => {
+    if (refreshPatients) {
+      refreshPatients();
+    }
+  };
 
   const filteredPatients = patients.filter(patient =>
     patient.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -32,7 +40,6 @@ const PatientsList = ({
     });
   };
 
-  // Fonction pour ouvrir le modal de paiement
   const handleOpenPayment = (patient) => {
     setSelectedPatientForPaiement(patient);
     setShowPaiementModal(true);
@@ -40,13 +47,36 @@ const PatientsList = ({
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
         <h4 style={{ margin: 0 }}>Liste des Patients</h4>
-        <button onClick={() => setShowAddModal(true)} style={{
-          background: '#667eea', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer'
-        }}>
-          <FaPlus style={{ marginRight: '8px' }} /> Nouveau Patient
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={() => setShowImportModal(true)} 
+            style={{
+              background: '#28a745', 
+              color: 'white', 
+              border: 'none', 
+              padding: '10px 20px', 
+              borderRadius: '8px', 
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <FaFileExcel /> Importer Excel
+          </button>
+          <button onClick={() => setShowAddModal(true)} style={{
+            background: '#667eea', 
+            color: 'white', 
+            border: 'none', 
+            padding: '10px 20px', 
+            borderRadius: '8px', 
+            cursor: 'pointer'
+          }}>
+            <FaPlus style={{ marginRight: '8px' }} /> Nouveau Patient
+          </button>
+        </div>
       </div>
 
       <div style={{ marginBottom: '20px', position: 'relative' }}>
@@ -163,6 +193,12 @@ const PatientsList = ({
           <p>Aucun patient ne correspond à votre recherche</p>
         </div>
       )}
+
+      <ImportExcelModal 
+        show={showImportModal}
+        setShow={setShowImportModal}
+        onImportSuccess={handleImportSuccess}
+      />
     </div>
   );
 };
