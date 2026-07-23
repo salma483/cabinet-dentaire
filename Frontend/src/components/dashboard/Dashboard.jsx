@@ -1,5 +1,7 @@
-// Dashboard.jsx - Version corrigée
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+// src/components/dashboard/Dashboard.jsx - VERSION COMPLÈTE MODIFIÉE
+// ⭐ Toutes les fonctions de radiologie utilisent désormais API_CONFIG.RADIOLOGY_API
+
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import toast, { Toaster } from "react-hot-toast";
@@ -26,7 +28,7 @@ import API_CONFIG from "../../config";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("patients");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [stats, setStats] = useState({
     total_patients: 0,
     enfants: 0,
@@ -41,12 +43,13 @@ const Dashboard = () => {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showPaiementModal, setShowPaiementModal] = useState(false);
   const [showRadiographieModal, setShowRadiographieModal] = useState(false);
-  const [selectedPatientForPaiement, setSelectedPatientForPaiement] = useState(null);
+  const [selectedPatientForPaiement, setSelectedPatientForPaiement] =
+    useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // Éviter les appels multiples
   const initialLoadDone = useRef(false);
-  const isMounted = useRef(true);
 
   const [dateFilter, setDateFilter] = useState(
     new Date().toISOString().split("T")[0],
@@ -54,51 +57,37 @@ const Dashboard = () => {
   const [radiographies, setRadiographies] = useState([]);
   const [selectedRadioPatient, setSelectedRadioPatient] = useState(null);
   const [uploading, setUploading] = useState(false);
-  
-  // ⭐ CORRECTION : Utiliser des objets avec des valeurs stables
-  const [newPatient, setNewPatient] = useState(() => ({
+  const [newPatient, setNewPatient] = useState({
     full_name: "",
     birth_date: "",
     phone: "",
     address: "",
-  }));
-
-  const [newAppointment, setNewAppointment] = useState(() => ({
+  });
+  const [newAppointment, setNewAppointment] = useState({
     patient_id: "",
     patient_name: "",
     appointment_date: new Date().toISOString().split("T")[0],
     appointment_time: "09:00",
     type: "Consultation",
     notes: "",
-  }));
-
-  const [newRadiographie, setNewRadiographie] = useState(() => ({
+  });
+  const [newRadiographie, setNewRadiographie] = useState({
     patient_id: "",
     description: "",
     image: null,
-  }));
+  });
 
-  const user = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("user") || "{}");
-    } catch {
-      return {};
-    }
-  }, []);
-
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [currentUser, setCurrentUser] = useState(user);
-  
-  const handleUpdateUser = useCallback((updatedUser) => {
+  const handleUpdateUser = (updatedUser) => {
     setCurrentUser(updatedUser);
-  }, []);
+  };
 
-  const token = useMemo(() => localStorage.getItem("token"), []);
-  const axiosConfig = useMemo(() => ({ headers: { Authorization: `Bearer ${token}` } }), [token]);
+  const token = localStorage.getItem("token");
+  const axiosConfig = { headers: { Authorization: `Bearer ${token}` } };
 
-  // ⭐ CORRECTION : Stabiliser les fonctions de fetch avec useCallback
+  // ⭐⭐ Charger les patients
   const fetchPatients = useCallback(async () => {
-    if (!isMounted.current) return;
-    
     setLoading(true);
     try {
       console.log("📋 Chargement des patients...");
@@ -116,46 +105,60 @@ const Dashboard = () => {
         );
         paymentDetails = paiementResponse.data || [];
       } catch (paymentError) {
-        console.warn("⚠️ Impossible de charger les détails de paiement:", paymentError);
+        console.warn(
+          "⚠️ Impossible de charger les détails de paiement:",
+          paymentError,
+        );
       }
 
       const mergedPatients = patientsData.map((patient) => {
         const paiement = paymentDetails.find((p) => p.id === patient.id);
         return {
           ...patient,
-          montant_total: paiement?.montant_total !== undefined ? paiement.montant_total : patient.montant_total,
-          montant_paye: paiement?.montant_paye !== undefined ? paiement.montant_paye : patient.montant_paye,
-          montant_restant: paiement?.montant_restant !== undefined ? paiement.montant_restant : patient.montant_restant,
-          paiement_status: paiement?.paiement_status || patient.paiement_status || "non_paye",
-          type_paiement: paiement?.type_paiement || patient.type_paiement || "espece",
+          montant_total:
+            paiement?.montant_total !== undefined
+              ? paiement.montant_total
+              : patient.montant_total,
+          montant_paye:
+            paiement?.montant_paye !== undefined
+              ? paiement.montant_paye
+              : patient.montant_paye,
+          montant_restant:
+            paiement?.montant_restant !== undefined
+              ? paiement.montant_restant
+              : patient.montant_restant,
+          paiement_status:
+            paiement?.paiement_status || patient.paiement_status || "non_paye",
+          type_paiement:
+            paiement?.type_paiement || patient.type_paiement || "espece",
           cheque_info: paiement?.cheque_info || patient.cheque_info || null,
           notes: paiement?.notes || patient.notes || "",
-          date_dernier_paiement: paiement?.date_dernier_paiement || patient.date_dernier_paiement || null,
+          date_dernier_paiement:
+            paiement?.date_dernier_paiement ||
+            patient.date_dernier_paiement ||
+            null,
         };
       });
 
       console.log("✅ Données patients chargées:", mergedPatients.length);
-      
-      if (isMounted.current) {
-        setPatients(mergedPatients);
-        setStats({
-          total_patients: mergedPatients.length,
-          enfants: mergedPatients.filter((p) => p.age && p.age < 18).length,
-          adultes: mergedPatients.filter((p) => p.age && p.age >= 18 && p.age < 65).length,
-          seniors: mergedPatients.filter((p) => p.age && p.age >= 65).length,
-          paid: mergedPatients.filter((p) => p.paiement_status === "paye").length,
-          unpaid: mergedPatients.filter((p) => p.paiement_status === "non_paye").length,
-        });
-      }
+      setPatients(mergedPatients);
+
+      setStats({
+        total_patients: mergedPatients.length,
+        enfants: mergedPatients.filter((p) => p.age && p.age < 18).length,
+        adultes: mergedPatients.filter(
+          (p) => p.age && p.age >= 18 && p.age < 65,
+        ).length,
+        seniors: mergedPatients.filter((p) => p.age && p.age >= 65).length,
+        paid: mergedPatients.filter((p) => p.paiement_status === "paye").length,
+        unpaid: mergedPatients.filter((p) => p.paiement_status === "non_paye")
+          .length,
+      });
     } catch (error) {
       console.error("❌ Erreur chargement patients:", error);
-      if (isMounted.current) {
-        toast.error("Erreur de chargement des patients");
-      }
+      toast.error("Erreur de chargement des patients");
     } finally {
-      if (isMounted.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [axiosConfig]);
 
@@ -165,23 +168,13 @@ const Dashboard = () => {
         `${API_CONFIG.DASHBOARD_API}/appointments`,
         axiosConfig,
       );
-      if (isMounted.current) {
-        setAppointments(response.data);
-      }
+      setAppointments(response.data);
     } catch (error) {
       console.error("Erreur appointments:", error);
     }
   }, [axiosConfig]);
 
-  // ⭐ CORRECTION : Nettoyer le mount ref
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
-
-  // ⭐ CORRECTION : Chargement initial
+  // ⭐⭐ Chargement initial UNE SEULE FOIS
   useEffect(() => {
     if (!initialLoadDone.current) {
       initialLoadDone.current = true;
@@ -190,14 +183,13 @@ const Dashboard = () => {
     }
   }, [fetchPatients, fetchAppointments]);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = () => {
     localStorage.clear();
     toast.success("Déconnexion réussie");
     setTimeout(() => navigate("/login"), 1000);
-  }, [navigate]);
+  };
 
-  // ⭐ CORRECTION : Stabiliser toutes les fonctions de gestion
-  const handleAddPatient = useCallback(async () => {
+  const handleAddPatient = async () => {
     if (!newPatient.full_name || newPatient.full_name.trim() === "") {
       toast.error("Le nom complet est requis");
       return;
@@ -222,11 +214,13 @@ const Dashboard = () => {
       fetchPatients();
     } catch (error) {
       console.error("Erreur ajout patient:", error);
-      toast.error(error.response?.data?.error || "Erreur lors de l'ajout du patient");
+      toast.error(
+        error.response?.data?.error || "Erreur lors de l'ajout du patient",
+      );
     }
-  }, [newPatient, axiosConfig, fetchPatients]);
+  };
 
-  const handleAddAppointment = useCallback(async () => {
+  const handleAddAppointment = async () => {
     if (!newAppointment.patient_name) {
       toast.error("Le nom du patient est requis");
       return;
@@ -258,9 +252,9 @@ const Dashboard = () => {
       toast.error("Erreur lors de l'ajout du rendez-vous");
       console.error(error);
     }
-  }, [newAppointment, axiosConfig, fetchAppointments]);
+  };
 
-  const handleDeleteAppointment = useCallback(async (id) => {
+  const handleDeleteAppointment = async (id) => {
     if (window.confirm("Supprimer ce rendez-vous ?")) {
       try {
         await axios.delete(
@@ -273,9 +267,9 @@ const Dashboard = () => {
         toast.error("Erreur lors de la suppression");
       }
     }
-  }, [axiosConfig, fetchAppointments]);
+  };
 
-  const handleDeletePatient = useCallback(async (id) => {
+  const handleDeletePatient = async (id) => {
     if (window.confirm("Êtes-vous sûr de vouloir supprimer ce patient ?")) {
       try {
         await axios.delete(
@@ -288,10 +282,18 @@ const Dashboard = () => {
         toast.error("Erreur lors de la suppression");
       }
     }
-  }, [axiosConfig, fetchPatients]);
+  };
 
-  // ⭐ CORRECTION : Stabiliser fetchRadiographies
-  const fetchRadiographies = useCallback(async (patientId) => {
+  // ============ GESTION DES RADIOGRAPHIES (MODIFIÉES POUR UTILISER LA NOUVELLE API) ============
+
+  const handleOpenRadiographies = async (patient) => {
+    setSelectedRadioPatient(patient);
+    await fetchRadiographies(patient.id);
+    setShowRadiographieModal(true);
+  };
+
+  // ⭐⭐ FONCTION MODIFIÉE POUR UTILISER LA NOUVELLE API
+  const fetchRadiographies = async (patientId) => {
     try {
       console.log("📋 Chargement radiographies pour patient:", patientId);
       const response = await axios.get(
@@ -299,23 +301,15 @@ const Dashboard = () => {
         axiosConfig,
       );
       console.log("✅ Radiographies chargées:", response.data);
-      if (isMounted.current) {
-        setRadiographies(response.data);
-      }
+      setRadiographies(response.data);
     } catch (error) {
       console.error("❌ Erreur chargement:", error);
       toast.error("Erreur de chargement des radiographies");
     }
-  }, [axiosConfig]);
+  };
 
-  const handleOpenRadiographies = useCallback(async (patient) => {
-    setSelectedRadioPatient(patient);
-    await fetchRadiographies(patient.id);
-    setShowRadiographieModal(true);
-  }, [fetchRadiographies]);
-
-  // ⭐ CORRECTION : Stabiliser handleUploadRadiographie
-  const handleUploadRadiographie = useCallback(async () => {
+  // ⭐⭐ FONCTION MODIFIÉE POUR L'UPLOAD
+  const handleUploadRadiographie = async () => {
     if (!newRadiographie.image) {
       toast.error("Veuillez sélectionner une image");
       return;
@@ -370,9 +364,10 @@ const Dashboard = () => {
     } finally {
       setUploading(false);
     }
-  }, [newRadiographie, selectedRadioPatient, token, fetchRadiographies]);
+  };
 
-  const handleDeleteRadiographie = useCallback(async (id) => {
+  // ⭐⭐ FONCTION MODIFIÉE POUR LA SUPPRESSION
+  const handleDeleteRadiographie = async (id) => {
     if (window.confirm("Supprimer cette radiographie ?")) {
       try {
         await axios.delete(
@@ -387,33 +382,20 @@ const Dashboard = () => {
         toast.error("Erreur lors de la suppression");
       }
     }
-  }, [axiosConfig, selectedRadioPatient, fetchRadiographies]);
+  };
 
-  const handleFileChange = useCallback((e) => {
-    setNewRadiographie((prev) => ({
-      ...prev,
+  const handleFileChange = (e) => {
+    setNewRadiographie({
+      ...newRadiographie,
       image: e.target.files[0],
-    }));
-  }, []);
+    });
+  };
 
-  // ⭐ CORRECTION : Utiliser useMemo pour les calculs
-  const todayAppointments = useMemo(() => {
-    const today = new Date().toISOString().split("T")[0];
-    return appointments.filter((apt) => apt.appointment_date === today);
-  }, [appointments]);
+  const todayAppointments = appointments.filter(
+    (apt) => apt.appointment_date === new Date().toISOString().split("T")[0],
+  );
 
-  // ⭐ CORRECTION : Stabiliser les handlers de paiement
-  const handleOpenPaymentModal = useCallback((patient) => {
-    setSelectedPatientForPaiement(patient);
-    setShowPaiementModal(true);
-  }, []);
-
-  const handlePaymentSuccess = useCallback(() => {
-    fetchPatients();
-  }, [fetchPatients]);
-
-  // ⭐ CORRECTION : Optimiser le rendu du contenu
-  const renderContent = useCallback(() => {
+  const renderContent = () => {
     if (loading && activeTab === "patients") {
       return (
         <div style={{ textAlign: "center", padding: "50px" }}>
@@ -449,18 +431,17 @@ const Dashboard = () => {
       case "patients":
         return (
           <PatientsList
-  patients={patients}
-  searchTerm={searchTerm}
-  setSearchTerm={setSearchTerm}
-  setShowAddModal={setShowAddModal}
-  handleOpenRadiographies={handleOpenRadiographies}
-  setNewAppointment={setNewAppointment}
-  setShowAppointmentModal={setShowAppointmentModal}
-  handleDeletePatient={handleDeletePatient}
-  setSelectedPatientForPaiement={setSelectedPatientForPaiement}
-  setShowPaiementModal={setShowPaiementModal}
-  refreshPatients={fetchPatients}
-/>
+            patients={patients}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            setShowAddModal={setShowAddModal}
+            handleOpenRadiographies={handleOpenRadiographies}
+            setNewAppointment={setNewAppointment}
+            setShowAppointmentModal={setShowAppointmentModal}
+            handleDeletePatient={handleDeletePatient}
+            setSelectedPatientForPaiement={setSelectedPatientForPaiement}
+            setShowPaiementModal={setShowPaiementModal}
+          />
         );
       case "consultations":
         return <ConsultationsSection patients={patients} />;
@@ -486,11 +467,7 @@ const Dashboard = () => {
         );
       case "alerts":
         return (
-          <AlertsSection
-            appointments={appointments}
-            patients={patients}
-            onPaymentClick={handleOpenPaymentModal}
-          />
+          <AlertsSection appointments={appointments} patients={patients} />
         );
       case "settings":
         return <Settings user={currentUser} onUpdate={handleUpdateUser} />;
@@ -499,68 +476,7 @@ const Dashboard = () => {
       default:
         return null;
     }
-  }, [
-    activeTab,
-    loading,
-    stats,
-    patients,
-    todayAppointments,
-    appointments,
-    searchTerm,
-    currentUser,
-    handleOpenPaymentModal,
-    handleUpdateUser,
-    handleOpenRadiographies,
-    handleDeletePatient,
-    handleDeleteAppointment,
-  ]);
-
-  // ⭐ CORRECTION : Props pour les modals
-  const addPatientModalProps = useMemo(() => ({
-    showAddModal,
-    setShowAddModal,
-    newPatient,
-    setNewPatient,
-    handleAddPatient,
-  }), [showAddModal, newPatient, handleAddPatient]);
-
-  const appointmentModalProps = useMemo(() => ({
-    showAppointmentModal,
-    setShowAppointmentModal,
-    newAppointment,
-    setNewAppointment,
-    patients,
-    handleAddAppointment,
-  }), [showAppointmentModal, newAppointment, patients, handleAddAppointment]);
-
-  const paiementModalProps = useMemo(() => ({
-    showPaiementModal,
-    setShowPaiementModal,
-    selectedPatientForPaiement,
-    onPaymentSuccess: handlePaymentSuccess,
-  }), [showPaiementModal, selectedPatientForPaiement, handlePaymentSuccess]);
-
-  const radiographieModalProps = useMemo(() => ({
-    showRadiographieModal,
-    setShowRadiographieModal,
-    selectedRadioPatient,
-    radiographies,
-    newRadiographie,
-    setNewRadiographie,
-    uploading,
-    handleFileChange,
-    handleUploadRadiographie,
-    handleDeleteRadiographie,
-  }), [
-    showRadiographieModal,
-    selectedRadioPatient,
-    radiographies,
-    newRadiographie,
-    uploading,
-    handleFileChange,
-    handleUploadRadiographie,
-    handleDeleteRadiographie,
-  ]);
+  };
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#f0f2f5" }}>
@@ -613,11 +529,45 @@ const Dashboard = () => {
         {renderContent()}
       </div>
 
-      {/* Modals - Avec des props stabilisées */}
-      <AddPatientModal {...addPatientModalProps} />
-      <AppointmentModal {...appointmentModalProps} />
-      <PaiementModal {...paiementModalProps} />
-      <RadiographieModal {...radiographieModalProps} />
+      {/* Modals */}
+      <AddPatientModal
+        showAddModal={showAddModal}
+        setShowAddModal={setShowAddModal}
+        newPatient={newPatient}
+        setNewPatient={setNewPatient}
+        handleAddPatient={handleAddPatient}
+      />
+
+      <AppointmentModal
+        showAppointmentModal={showAppointmentModal}
+        setShowAppointmentModal={setShowAppointmentModal}
+        newAppointment={newAppointment}
+        setNewAppointment={setNewAppointment}
+        patients={patients}
+        handleAddAppointment={handleAddAppointment}
+      />
+
+      <PaiementModal
+        showPaiementModal={showPaiementModal}
+        setShowPaiementModal={setShowPaiementModal}
+        selectedPatientForPaiement={selectedPatientForPaiement}
+        onPaymentSuccess={() => {
+          fetchPatients();
+        }}
+      />
+
+      <RadiographieModal
+        showRadiographieModal={showRadiographieModal}
+        setShowRadiographieModal={setShowRadiographieModal}
+        selectedRadioPatient={selectedRadioPatient}
+        radiographies={radiographies}
+        newRadiographie={newRadiographie}
+        setNewRadiographie={setNewRadiographie}
+        uploading={uploading}
+        handleFileChange={handleFileChange}
+        handleUploadRadiographie={handleUploadRadiographie}
+        handleDeleteRadiographie={handleDeleteRadiographie}
+      />
     </div>
   );
 };

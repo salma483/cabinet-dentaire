@@ -12,6 +12,9 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [importStats, setImportStats] = useState(null);
   const [step, setStep] = useState(1);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState('');
+  const [workbookData, setWorkbookData] = useState(null);
   const fileInputRef = useRef(null);
 
   const token = localStorage.getItem('token');
@@ -59,50 +62,102 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
       try {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-
-        if (jsonData.length === 0) {
-          toast.error('Le fichier est vide');
-          return;
-        }
-
-        const standardizedData = jsonData.map(row => {
-          const newRow = {};
-          Object.keys(row).forEach(key => {
-            const normalizedKey = key.toLowerCase().trim().replace(/[^a-z]/g, '');
-            
-            if (['full_name', 'nomcomplet', 'nom', 'patient', 'name'].includes(normalizedKey)) {
-              newRow.full_name = row[key];
-            } else if (['birth_date', 'datedenaissance', 'birthdate', 'birth', 'age'].includes(normalizedKey)) {
-              newRow.birth_date = formatDate(row[key]);
-            } else if (['phone', 'telephone', 'tel', 'contact', 'numero'].includes(normalizedKey)) {
-              newRow.phone = String(row[key]).replace(/[^0-9+]/g, '');
-            } else if (['address', 'adresse', 'adr', 'lieu', 'domicile'].includes(normalizedKey)) {
-              newRow.address = row[key];
-            } else if (['paiement_status', 'statut', 'status', 'payment', 'statutpaiement'].includes(normalizedKey)) {
-              newRow.paiement_status = normalizeStatus(row[key]);
-            }
-          });
-          return newRow;
+        
+        // Récupérer toutes les feuilles qui ont des données
+        const sheetsWithData = [];
+        const sheetsData = {};
+        
+        workbook.SheetNames.forEach(sheetName => {
+          const sheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(sheet);
+          if (jsonData && jsonData.length > 0) {
+            sheetsWithData.push(sheetName);
+            sheetsData[sheetName] = jsonData;
+          }
         });
 
-        const validData = standardizedData.filter(row => row.full_name && row.full_name.trim() !== '');
-        
-        if (validData.length === 0) {
-          toast.error('Aucune donnée valide trouvée');
+        if (sheetsWithData.length === 0) {
+          toast.error('Aucune feuille contenant des données trouvée');
           return;
         }
 
-        setPreviewData(validData);
-        setStep(2);
-        toast.success(`${validData.length} patients trouvés`);
+        // Stocker les données du workbook
+        setWorkbookData(sheetsData);
+        setSheetNames(sheetsWithData);
+        
+        // Sélectionner la première feuille avec données
+        const firstSheet = sheetsWithData[0];
+        setSelectedSheet(firstSheet);
+        
+        // Traiter la première feuille
+        processSheetData(sheetsData[firstSheet], firstSheet);
+        
       } catch (error) {
         console.error('Erreur de lecture:', error);
         toast.error('Erreur lors de la lecture du fichier');
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const processSheetData = (jsonData, sheetName) => {
+    if (!jsonData || jsonData.length === 0) {
+      toast.error('La feuille sélectionnée est vide');
+      return;
+    }
+
+    console.log(`📊 Traitement de la feuille "${sheetName}" avec ${jsonData.length} lignes`);
+    console.log('🔍 Colonnes détectées:', Object.keys(jsonData[0] || {}));
+
+    const standardizedData = jsonData.map(row => {
+      const newRow = {};
+      Object.keys(row).forEach(key => {
+        const keyLower = key.toLowerCase().trim();
+        
+        // Recherche de "nom" ou "name"
+        if (keyLower.includes('nom') || keyLower.includes('name') || keyLower.includes('patient')) {
+          newRow.full_name = row[key];
+        } 
+        // Recherche de "date" ou "birth"
+        else if (keyLower.includes('date') || keyLower.includes('birth') || keyLower.includes('naissance')) {
+          newRow.birth_date = formatDate(row[key]);
+        } 
+        // Recherche de "tel" ou "phone" ou "contact"
+        else if (keyLower.includes('tel') || keyLower.includes('phone') || keyLower.includes('contact') || keyLower.includes('num') || keyLower.includes('portable')) {
+          newRow.phone = String(row[key] || '').replace(/[^0-9+]/g, '');
+        } 
+        // Recherche de "adresse" ou "address" ou "lieu" ou "domicile"
+        else if (keyLower.includes('adresse') || keyLower.includes('address') || keyLower.includes('lieu') || keyLower.includes('domicile')) {
+          newRow.address = row[key];
+        } 
+        // Recherche de "statut" ou "status" ou "payment"
+        else if (keyLower.includes('statut') || keyLower.includes('status') || keyLower.includes('payment') || keyLower.includes('paiement')) {
+          newRow.paiement_status = normalizeStatus(row[key]);
+        }
+      });
+      return newRow;
+    });
+
+    const validData = standardizedData.filter(row => 
+      row.full_name && row.full_name.toString().trim() !== ''
+    );
+
+    if (validData.length === 0) {
+      toast.error('Aucune donnée valide trouvée dans la feuille sélectionnée');
+      return;
+    }
+
+    setPreviewData(validData);
+    setStep(2);
+    toast.success(`${validData.length} patients trouvés dans la feuille "${sheetName}"`);
+  };
+
+  const handleSheetChange = (e) => {
+    const sheetName = e.target.value;
+    setSelectedSheet(sheetName);
+    if (workbookData && workbookData[sheetName]) {
+      processSheetData(workbookData[sheetName], sheetName);
+    }
   };
 
   const formatDate = (value) => {
@@ -112,6 +167,13 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
       return date.toISOString().split('T')[0];
     }
     const str = String(value).trim();
+    
+    // Si c'est déjà au format YYYY-MM-DD
+    if (str.match(/^\d{4}-\d{2}-\d{2}/)) {
+      return str.substring(0, 10);
+    }
+    
+    // Format DD/MM/YYYY ou DD/MM/YY
     if (str.includes('/')) {
       const parts = str.split('/');
       if (parts.length === 3) {
@@ -120,25 +182,29 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
         return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
       }
     }
+    
+    // Format DD-MM-YYYY
     if (str.includes('-')) {
       const parts = str.split('-');
       if (parts.length === 3) {
         return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
       }
     }
+    
     try {
       const date = new Date(str);
       if (!isNaN(date.getTime())) {
         return date.toISOString().split('T')[0];
       }
     } catch (e) {}
+    
     return null;
   };
 
   const normalizeStatus = (value) => {
     if (!value) return 'non_paye';
     const str = String(value).toLowerCase().trim();
-    if (str.includes('paye') || str.includes('paid') || str === 'payé') return 'paye';
+    if (str.includes('paye') || str.includes('paid') || str === 'payé' || str === 'paye') return 'paye';
     if (str.includes('semi') || str.includes('partiel') || str === 'semi-payé') return 'semi_paye';
     return 'non_paye';
   };
@@ -161,7 +227,7 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
           await axios.post(
             `${API_CONFIG.DASHBOARD_API}/patients`,
             {
-              full_name: patient.full_name.trim(),
+              full_name: patient.full_name.toString().trim(),
               birth_date: patient.birth_date || null,
               phone: patient.phone || null,
               address: patient.address || null,
@@ -204,6 +270,9 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
     setPreviewData([]);
     setImportStats(null);
     setStep(1);
+    setSheetNames([]);
+    setSelectedSheet('');
+    setWorkbookData(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -366,6 +435,11 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
                     <p style={{ margin: '5px 0 0', fontSize: '14px', color: '#6c757d' }}>
                       {(file.size / 1024).toFixed(1)} KB - Cliquez pour changer
                     </p>
+                    {sheetNames.length > 0 && (
+                      <p style={{ margin: '5px 0 0', fontSize: '13px', color: '#667eea' }}>
+                        📊 {sheetNames.length} feuille(s) avec données trouvée(s)
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -380,10 +454,40 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
                 )}
               </div>
 
+              {/* Sélecteur de feuille */}
+              {sheetNames.length > 1 && file && (
+                <div style={{ marginTop: '15px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    📑 Sélectionner la feuille à importer :
+                  </label>
+                  <select
+                    value={selectedSheet}
+                    onChange={handleSheetChange}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: '8px',
+                      border: '2px solid #dee2e6',
+                      fontSize: '14px',
+                    }}
+                  >
+                    {sheetNames.map(name => (
+                      <option key={name} value={name}>
+                        {name} ({workbookData?.[name]?.length || 0} lignes)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {file && (
                 <div style={{ marginTop: '15px', textAlign: 'right' }}>
                   <button
-                    onClick={() => setStep(2)}
+                    onClick={() => {
+                      if (selectedSheet && workbookData?.[selectedSheet]) {
+                        processSheetData(workbookData[selectedSheet], selectedSheet);
+                      }
+                    }}
                     style={{
                       padding: '12px 30px',
                       background: '#667eea',
@@ -413,6 +517,7 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
               }}>
                 <span>
                   <strong>{previewData.length}</strong> patients trouvés
+                  {selectedSheet && <span style={{ color: '#6c757d', fontSize: '13px' }}> (feuille: {selectedSheet})</span>}
                 </span>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
