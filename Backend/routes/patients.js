@@ -36,6 +36,7 @@ router.get('/test', (req, res) => {
 // GET /api/patients - Récupérer tous les patients
 router.get('/', async (req, res) => {
   try {
+    console.log('🔍 Récupération des patients...');
     const result = await pool.query(`
       SELECT
         p.id,
@@ -54,44 +55,127 @@ router.get('/', async (req, res) => {
       FROM patients p
       ORDER BY p.numero_fiche ASC
     `);
+    console.log(`✅ ${result.rows.length} patients trouvés`);
     res.json(result.rows);
   } catch (error) {
-    console.error('Erreur get patients:', error);
+    console.error('❌ Erreur get patients:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/patients - Ajouter un patient
+// ============================================================
+// ✅ FONCTION DE VALIDATION DES DATES (utilisée dans POST et PUT)
+// ============================================================
+const validateAndCleanDate = (birth_date) => {
+  if (!birth_date) return null;
+  
+  try {
+    let cleanDate = String(birth_date).trim();
+    
+    // 🔥 Si c'est une chaîne vide
+    if (!cleanDate || cleanDate === '') return null;
+    
+    // 🔥 Enlever les accents (é, è, à, etc.)
+    cleanDate = cleanDate.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    
+    // 🔥 Garder uniquement chiffres, /, -
+    cleanDate = cleanDate.replace(/[^0-9\-/]/g, '');
+    
+    // 🔥 Si après nettoyage c'est vide
+    if (!cleanDate || cleanDate === '') return null;
+    
+    // 🔥 Essayer de parser la date
+    const date = new Date(cleanDate);
+    
+    // 🔥 Vérifier que la date est valide
+    if (isNaN(date.getTime())) return null;
+    
+    // 🔥 Vérifier que l'année est dans une plage valide (1900-2100)
+    const year = date.getFullYear();
+    if (year < 1900 || year > 2100) return null;
+    
+    // 🔥 Retourner la date au format YYYY-MM-DD
+    return date.toISOString().split('T')[0];
+    
+  } catch (error) {
+    console.error('❌ Erreur validation date:', error);
+    return null;
+  }
+};
+
+// ============================================================
+// ✅ FONCTION DE CALCUL DE L'ÂGE
+// ============================================================
+const calculateAge = (birthDateStr) => {
+  if (!birthDateStr) return null;
+  
+  try {
+    const birth = new Date(birthDateStr);
+    if (isNaN(birth.getTime())) return null;
+    
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
+  } catch (error) {
+    return null;
+  }
+};
+
+// ============================================================
+// POST /api/patients - Ajouter un patient (AVEC VALIDATION)
+// ============================================================
 router.post('/', async (req, res) => {
   try {
     const { full_name, birth_date, phone, address, paiement_status } = req.body;
 
+    // ✅ Validation du nom
     if (!full_name || full_name.trim() === '') {
-      return res.status(400).json({ error: 'Le nom complet est requis' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Le nom complet est requis' 
+      });
     }
 
-    let age = null;
-    if (birth_date) {
-      const birth = new Date(birth_date);
-      const today = new Date();
-      age = today.getFullYear() - birth.getFullYear();
-      const m = today.getMonth() - birth.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    // ✅ Validation et nettoyage de la date
+    const validatedBirthDate = validateAndCleanDate(birth_date);
+    
+    // ✅ Calcul de l'âge
+    const age = calculateAge(validatedBirthDate);
+
+    // ✅ Nettoyage du téléphone
+    let cleanPhone = null;
+    if (phone) {
+      cleanPhone = String(phone).trim().substring(0, 20);
     }
 
-    const nextNumeroFicheResult = await pool.query('SELECT COALESCE(MAX(numero_fiche), 0) AS max_fiche FROM patients');
+    // ✅ Nettoyage de l'adresse
+    let cleanAddress = null;
+    if (address) {
+      cleanAddress = String(address).trim().substring(0, 255);
+    }
+
+    // ✅ Récupération du prochain numéro de fiche
+    const nextNumeroFicheResult = await pool.query(
+      'SELECT COALESCE(MAX(numero_fiche), 0) AS max_fiche FROM patients'
+    );
     const nextNumeroFiche = (nextNumeroFicheResult.rows[0]?.max_fiche || 0) + 1;
 
+    // ✅ Insertion du patient
     const insertResult = await pool.query(
       `INSERT INTO patients
-        (full_name, address, phone, birth_date, age, paiement_status, montant_total, montant_paye, montant_restant, numero_fiche)
+        (full_name, address, phone, birth_date, age, paiement_status, 
+         montant_total, montant_paye, montant_restant, numero_fiche)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [
-        full_name.trim(),
-        address || null,
-        phone || null,
-        birth_date || null,
+        full_name.trim().substring(0, 255),
+        cleanAddress,
+        cleanPhone,
+        validatedBirthDate,
         age,
         paiement_status || 'non_paye',
         0,
@@ -101,25 +185,36 @@ router.post('/', async (req, res) => {
       ]
     );
 
-    const newPatientResult = await pool.query('SELECT * FROM patients WHERE id = $1', [insertResult.rows[0].id]);
+    // ✅ Récupérer le patient créé
+    const newPatientResult = await pool.query(
+      'SELECT * FROM patients WHERE id = $1', 
+      [insertResult.rows[0].id]
+    );
 
     res.status(201).json({
       success: true,
       message: 'Patient ajouté avec succès',
       patient: newPatientResult.rows[0]
     });
+
   } catch (error) {
-    console.error('Erreur ajout patient:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Erreur ajout patient:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
-// PUT /api/patients/:id - Modifier les coordonnées d'un patient
+// ============================================================
+// PUT /api/patients/:id - Modifier un patient (AVEC VALIDATION)
+// ============================================================
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { full_name, birth_date, phone, address } = req.body;
 
+    // ✅ Vérifier si le patient existe
     const patientResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
     if (patientResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -128,6 +223,7 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    // ✅ Validation du nom
     if (!full_name || full_name.trim() === '') {
       return res.status(400).json({ 
         success: false,
@@ -135,15 +231,25 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    let age = null;
-    if (birth_date) {
-      const birth = new Date(birth_date);
-      const today = new Date();
-      age = today.getFullYear() - birth.getFullYear();
-      const m = today.getMonth() - birth.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    // ✅ Validation et nettoyage de la date
+    const validatedBirthDate = validateAndCleanDate(birth_date);
+    
+    // ✅ Calcul de l'âge
+    const age = calculateAge(validatedBirthDate);
+
+    // ✅ Nettoyage du téléphone
+    let cleanPhone = null;
+    if (phone) {
+      cleanPhone = String(phone).trim().substring(0, 20);
     }
 
+    // ✅ Nettoyage de l'adresse
+    let cleanAddress = null;
+    if (address) {
+      cleanAddress = String(address).trim().substring(0, 255);
+    }
+
+    // ✅ Mise à jour du patient
     await pool.query(
       `UPDATE patients SET
         full_name = $1,
@@ -154,15 +260,16 @@ router.put('/:id', async (req, res) => {
         updated_at = NOW()
        WHERE id = $6`,
       [
-        full_name.trim(),
-        birth_date || null,
+        full_name.trim().substring(0, 255),
+        validatedBirthDate,
         age,
-        phone || null,
-        address || null,
+        cleanPhone,
+        cleanAddress,
         id
       ]
     );
 
+    // ✅ Récupérer le patient mis à jour
     const updatedResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
     const updatedPatient = updatedResult.rows[0];
 
@@ -173,7 +280,7 @@ router.put('/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur update patient:', error);
+    console.error('❌ Erreur update patient:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -181,8 +288,9 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// ============ SUPPRESSION MULTIPLE ============
+// ============================================================
 // DELETE /api/patients - Supprimer plusieurs patients
+// ============================================================
 router.delete('/', async (req, res) => {
   try {
     const { ids } = req.body;
@@ -205,7 +313,7 @@ router.delete('/', async (req, res) => {
 
     const placeholders = validIds.map((_, i) => `$${i + 1}`).join(', ');
     
-    // Récupérer les patients pour supprimer leurs radiographies
+    // ✅ Vérifier que les patients existent
     const patientsResult = await pool.query(
       `SELECT id FROM patients WHERE id IN (${placeholders})`,
       validIds
@@ -218,13 +326,13 @@ router.delete('/', async (req, res) => {
       });
     }
 
-    // Supprimer les radiographies associées
+    // ✅ Supprimer les radiographies associées
     const radioResult = await pool.query(
       `SELECT image_url FROM radiographies WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Supprimer les fichiers physiques des radiographies
+    // ✅ Supprimer les fichiers physiques
     for (const radio of radioResult.rows) {
       if (radio.image_url) {
         const filePath = path.join(__dirname, '..', radio.image_url);
@@ -234,37 +342,33 @@ router.delete('/', async (req, res) => {
       }
     }
     
-    // Supprimer les radiographies
+    // ✅ Supprimer toutes les données associées
     await pool.query(
       `DELETE FROM radiographies WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Supprimer l'historique des paiements
     await pool.query(
       `DELETE FROM paiement_historique WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Supprimer les rendez-vous
     await pool.query(
       `DELETE FROM appointments WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Supprimer les consultations
     await pool.query(
       `DELETE FROM consultations WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Supprimer les paiements
     await pool.query(
       `DELETE FROM paiements WHERE patient_id IN (${placeholders})`,
       validIds
     );
     
-    // Enfin, supprimer les patients
+    // ✅ Supprimer les patients
     const result = await pool.query(
       `DELETE FROM patients WHERE id IN (${placeholders}) RETURNING id`,
       validIds
@@ -278,7 +382,7 @@ router.delete('/', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erreur suppression multiple:', error);
+    console.error('❌ Erreur suppression multiple:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -286,7 +390,9 @@ router.delete('/', async (req, res) => {
   }
 });
 
+// ============================================================
 // PUT /api/patients/:id/payment - Mettre à jour le paiement
+// ============================================================
 router.put('/:id/payment', async (req, res) => {
   try {
     const { id } = req.params;
@@ -362,12 +468,14 @@ router.put('/:id/payment', async (req, res) => {
       notification
     });
   } catch (error) {
-    console.error('Erreur update payment:', error);
+    console.error('❌ Erreur update payment:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============================================================
 // GET /api/patients/:id/payment-history - Historique des paiements
+// ============================================================
 router.get('/:id/payment-history', async (req, res) => {
   try {
     const { id } = req.params;
@@ -388,12 +496,14 @@ router.get('/:id/payment-history', async (req, res) => {
 
     res.json(historique);
   } catch (error) {
-    console.error('Erreur get historique:', error);
+    console.error('❌ Erreur get historique:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============================================================
 // GET /api/patients/stats - Statistiques
+// ============================================================
 router.get('/stats', async (req, res) => {
   try {
     const totalResult = await pool.query('SELECT COUNT(*) AS count FROM patients');
@@ -424,12 +534,14 @@ router.get('/stats', async (req, res) => {
       total_restant: parseFloat(paymentStats.rows[0].total_restant) || 0
     });
   } catch (error) {
-    console.error('Erreur stats:', error);
+    console.error('❌ Erreur stats:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============================================================
 // POST /api/patients/radiographies - Upload radiographie
+// ============================================================
 router.post('/radiographies', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -458,7 +570,7 @@ router.post('/radiographies', upload.single('image'), async (req, res) => {
       uploaded_at: new Date()
     });
   } catch (error) {
-    console.error('Erreur upload:', error);
+    console.error('❌ Erreur upload:', error);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -466,18 +578,25 @@ router.post('/radiographies', upload.single('image'), async (req, res) => {
   }
 });
 
+// ============================================================
 // GET /api/patients/radiographies/:patientId - Récupérer les radiographies
+// ============================================================
 router.get('/radiographies/:patientId', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM radiographies WHERE patient_id = $1 ORDER BY uploaded_at DESC', [req.params.patientId]);
+    const result = await pool.query(
+      'SELECT * FROM radiographies WHERE patient_id = $1 ORDER BY uploaded_at DESC', 
+      [req.params.patientId]
+    );
     res.json(result.rows);
   } catch (error) {
-    console.error('Erreur radiographies:', error);
+    console.error('❌ Erreur radiographies:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============================================================
 // DELETE /api/patients/radiographies/:id - Supprimer une radiographie
+// ============================================================
 router.delete('/radiographies/:id', async (req, res) => {
   try {
     const result = await pool.query('SELECT image_url FROM radiographies WHERE id = $1', [req.params.id]);
@@ -493,17 +612,22 @@ router.delete('/radiographies/:id', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Erreur supprimer radiographie:', error);
+    console.error('❌ Erreur supprimer radiographie:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============================================================
 // DELETE /api/patients/:id - Supprimer un patient
+// ============================================================
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // ✅ Supprimer l'historique des paiements
     await pool.query('DELETE FROM paiement_historique WHERE patient_id = $1', [id]);
 
+    // ✅ Supprimer les radiographies et leurs fichiers
     const radiosResult = await pool.query('SELECT image_url FROM radiographies WHERE patient_id = $1', [id]);
     for (const radio of radiosResult.rows) {
       const filePath = path.join(__dirname, '..', radio.image_url);
@@ -511,10 +635,20 @@ router.delete('/:id', async (req, res) => {
     }
     await pool.query('DELETE FROM radiographies WHERE patient_id = $1', [id]);
 
+    // ✅ Supprimer les autres données associées
+    await pool.query('DELETE FROM appointments WHERE patient_id = $1', [id]);
+    await pool.query('DELETE FROM consultations WHERE patient_id = $1', [id]);
+    await pool.query('DELETE FROM paiements WHERE patient_id = $1', [id]);
+
+    // ✅ Supprimer le patient
     await pool.query('DELETE FROM patients WHERE id = $1', [id]);
-    res.json({ message: 'Patient supprimé avec succès' });
+    
+    res.json({ 
+      success: true,
+      message: 'Patient supprimé avec succès' 
+    });
   } catch (error) {
-    console.error('Erreur suppression patient:', error);
+    console.error('❌ Erreur suppression patient:', error);
     res.status(500).json({ error: error.message });
   }
 });
