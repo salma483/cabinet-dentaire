@@ -1,6 +1,4 @@
-// src/components/dashboard/Dashboard.jsx - VERSION COMPLÈTE MODIFIÉE
-// ⭐ Toutes les fonctions de radiologie utilisent désormais API_CONFIG.RADIOLOGY_API
-
+// src/components/dashboard/Dashboard.jsx - VERSION COMPLÈTE
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -23,7 +21,6 @@ import AppointmentModal from "./Modals/AppointmentModal";
 import PaiementModal from "./Modals/PaiementModal";
 import RadiographieModal from "./Modals/RadiographieModal";
 
-// ⭐ IMPORT DE LA CONFIGURATION DES APIS
 import API_CONFIG from "../../config";
 
 const Dashboard = () => {
@@ -43,12 +40,10 @@ const Dashboard = () => {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showPaiementModal, setShowPaiementModal] = useState(false);
   const [showRadiographieModal, setShowRadiographieModal] = useState(false);
-  const [selectedPatientForPaiement, setSelectedPatientForPaiement] =
-    useState(null);
+  const [selectedPatientForPaiement, setSelectedPatientForPaiement] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // Éviter les appels multiples
   const initialLoadDone = useRef(false);
 
   const [dateFilter, setDateFilter] = useState(
@@ -86,7 +81,7 @@ const Dashboard = () => {
   const token = localStorage.getItem("token");
   const axiosConfig = { headers: { Authorization: `Bearer ${token}` } };
 
-  // ⭐⭐ Charger les patients
+  // Charger les patients
   const fetchPatients = useCallback(async () => {
     setLoading(true);
     try {
@@ -174,7 +169,7 @@ const Dashboard = () => {
     }
   }, [axiosConfig]);
 
-  // ⭐⭐ Chargement initial UNE SEULE FOIS
+  // Chargement initial
   useEffect(() => {
     if (!initialLoadDone.current) {
       initialLoadDone.current = true;
@@ -182,6 +177,35 @@ const Dashboard = () => {
       fetchAppointments();
     }
   }, [fetchPatients, fetchAppointments]);
+
+  // ============ HANDLER: ÉDITION PATIENT ============
+  const handleEditPatient = useCallback(async () => {
+    await fetchPatients();
+    toast.success("Liste des patients actualisée");
+  }, [fetchPatients]);
+
+  // ============ SUPPRESSION MULTIPLE ============
+  const handleDeleteMultiplePatients = async (patientIds) => {
+    if (!patientIds || patientIds.length === 0) return;
+    
+    try {
+      await axios.delete(
+        `${API_CONFIG.DASHBOARD_API}/patients`,
+        {
+          ...axiosConfig,
+          data: { ids: patientIds }
+        }
+      );
+      
+      toast.success(`${patientIds.length} patient${patientIds.length > 1 ? 's' : ''} supprimé${patientIds.length > 1 ? 's' : ''} avec succès`);
+      await fetchPatients();
+      
+    } catch (error) {
+      console.error('Erreur suppression multiple:', error);
+      toast.error(error.response?.data?.error || 'Erreur lors de la suppression');
+      throw error;
+    }
+  };
 
   const handleLogout = () => {
     localStorage.clear();
@@ -284,7 +308,7 @@ const Dashboard = () => {
     }
   };
 
-  // ============ GESTION DES RADIOGRAPHIES (MODIFIÉES POUR UTILISER LA NOUVELLE API) ============
+  // ============ GESTION DES RADIOGRAPHIES ============
 
   const handleOpenRadiographies = async (patient) => {
     setSelectedRadioPatient(patient);
@@ -292,7 +316,6 @@ const Dashboard = () => {
     setShowRadiographieModal(true);
   };
 
-  // ⭐⭐ FONCTION MODIFIÉE POUR UTILISER LA NOUVELLE API
   const fetchRadiographies = async (patientId) => {
     try {
       console.log("📋 Chargement radiographies pour patient:", patientId);
@@ -308,7 +331,6 @@ const Dashboard = () => {
     }
   };
 
-  // ⭐⭐ FONCTION MODIFIÉE POUR L'UPLOAD
   const handleUploadRadiographie = async () => {
     if (!newRadiographie.image) {
       toast.error("Veuillez sélectionner une image");
@@ -366,7 +388,6 @@ const Dashboard = () => {
     }
   };
 
-  // ⭐⭐ FONCTION MODIFIÉE POUR LA SUPPRESSION
   const handleDeleteRadiographie = async (id) => {
     if (window.confirm("Supprimer cette radiographie ?")) {
       try {
@@ -441,6 +462,9 @@ const Dashboard = () => {
             handleDeletePatient={handleDeletePatient}
             setSelectedPatientForPaiement={setSelectedPatientForPaiement}
             setShowPaiementModal={setShowPaiementModal}
+            refreshPatients={fetchPatients}
+            onEditPatient={handleEditPatient}
+            onDeleteMultiplePatients={handleDeleteMultiplePatients}
           />
         );
       case "consultations":

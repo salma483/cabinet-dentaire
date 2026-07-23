@@ -33,6 +33,7 @@ router.get('/test', (req, res) => {
   res.json({ success: true, message: 'Route patients OK' });
 });
 
+// GET /api/patients - Récupérer tous les patients
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -48,7 +49,8 @@ router.get('/', async (req, res) => {
         p.montant_paye,
         p.montant_restant,
         p.numero_fiche,
-        p.created_at
+        p.created_at,
+        p.updated_at
       FROM patients p
       ORDER BY p.numero_fiche ASC
     `);
@@ -59,6 +61,7 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /api/patients - Ajouter un patient
 router.post('/', async (req, res) => {
   try {
     const { full_name, birth_date, phone, address, paiement_status } = req.body;
@@ -98,10 +101,12 @@ router.post('/', async (req, res) => {
       ]
     );
 
+    const newPatientResult = await pool.query('SELECT * FROM patients WHERE id = $1', [insertResult.rows[0].id]);
+
     res.status(201).json({
-      id: insertResult.rows[0].id,
-      numero_fiche: nextNumeroFiche,
-      message: 'Patient ajouté avec succès'
+      success: true,
+      message: 'Patient ajouté avec succès',
+      patient: newPatientResult.rows[0]
     });
   } catch (error) {
     console.error('Erreur ajout patient:', error);
@@ -109,10 +114,183 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/patients/:id - Modifier les coordonnées d'un patient
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { full_name, birth_date, phone, address } = req.body;
+
+    const patientResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
+    if (patientResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Patient non trouvé' 
+      });
+    }
+
+    if (!full_name || full_name.trim() === '') {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Le nom complet est requis' 
+      });
+    }
+
+    let age = null;
+    if (birth_date) {
+      const birth = new Date(birth_date);
+      const today = new Date();
+      age = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    }
+
+    await pool.query(
+      `UPDATE patients SET
+        full_name = $1,
+        birth_date = $2,
+        age = $3,
+        phone = $4,
+        address = $5,
+        updated_at = NOW()
+       WHERE id = $6`,
+      [
+        full_name.trim(),
+        birth_date || null,
+        age,
+        phone || null,
+        address || null,
+        id
+      ]
+    );
+
+    const updatedResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
+    const updatedPatient = updatedResult.rows[0];
+
+    res.json({
+      success: true,
+      message: 'Patient mis à jour avec succès',
+      patient: updatedPatient
+    });
+
+  } catch (error) {
+    console.error('Erreur update patient:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// ============ SUPPRESSION MULTIPLE ============
+// DELETE /api/patients - Supprimer plusieurs patients
+router.delete('/', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Aucun ID fourni' 
+      });
+    }
+
+    const validIds = ids.filter(id => !isNaN(parseInt(id))).map(id => parseInt(id));
+    
+    if (validIds.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'IDs invalides' 
+      });
+    }
+
+    const placeholders = validIds.map((_, i) => `$${i + 1}`).join(', ');
+    
+    // Récupérer les patients pour supprimer leurs radiographies
+    const patientsResult = await pool.query(
+      `SELECT id FROM patients WHERE id IN (${placeholders})`,
+      validIds
+    );
+    
+    if (patientsResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Aucun patient trouvé' 
+      });
+    }
+
+    // Supprimer les radiographies associées
+    const radioResult = await pool.query(
+      `SELECT image_url FROM radiographies WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Supprimer les fichiers physiques des radiographies
+    for (const radio of radioResult.rows) {
+      if (radio.image_url) {
+        const filePath = path.join(__dirname, '..', radio.image_url);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    }
+    
+    // Supprimer les radiographies
+    await pool.query(
+      `DELETE FROM radiographies WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Supprimer l'historique des paiements
+    await pool.query(
+      `DELETE FROM paiement_historique WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Supprimer les rendez-vous
+    await pool.query(
+      `DELETE FROM appointments WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Supprimer les consultations
+    await pool.query(
+      `DELETE FROM consultations WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Supprimer les paiements
+    await pool.query(
+      `DELETE FROM paiements WHERE patient_id IN (${placeholders})`,
+      validIds
+    );
+    
+    // Enfin, supprimer les patients
+    const result = await pool.query(
+      `DELETE FROM patients WHERE id IN (${placeholders}) RETURNING id`,
+      validIds
+    );
+    
+    res.json({
+      success: true,
+      message: `${result.rows.length} patient${result.rows.length > 1 ? 's' : ''} supprimé${result.rows.length > 1 ? 's' : ''} avec succès`,
+      deletedCount: result.rows.length,
+      deletedIds: result.rows.map(row => row.id)
+    });
+    
+  } catch (error) {
+    console.error('Erreur suppression multiple:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// PUT /api/patients/:id/payment - Mettre à jour le paiement
 router.put('/:id/payment', async (req, res) => {
   try {
     const { id } = req.params;
-    const { montant_total, montant_paye, notes } = req.body;
+    const { montant_total, montant_paye, notes, type_paiement, cheque_info } = req.body;
 
     const patientResult = await pool.query('SELECT * FROM patients WHERE id = $1', [id]);
     const patient = patientResult.rows[0];
@@ -189,6 +367,7 @@ router.put('/:id/payment', async (req, res) => {
   }
 });
 
+// GET /api/patients/:id/payment-history - Historique des paiements
 router.get('/:id/payment-history', async (req, res) => {
   try {
     const { id } = req.params;
@@ -214,6 +393,7 @@ router.get('/:id/payment-history', async (req, res) => {
   }
 });
 
+// GET /api/patients/stats - Statistiques
 router.get('/stats', async (req, res) => {
   try {
     const totalResult = await pool.query('SELECT COUNT(*) AS count FROM patients');
@@ -249,6 +429,7 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// POST /api/patients/radiographies - Upload radiographie
 router.post('/radiographies', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -285,6 +466,7 @@ router.post('/radiographies', upload.single('image'), async (req, res) => {
   }
 });
 
+// GET /api/patients/radiographies/:patientId - Récupérer les radiographies
 router.get('/radiographies/:patientId', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM radiographies WHERE patient_id = $1 ORDER BY uploaded_at DESC', [req.params.patientId]);
@@ -295,6 +477,7 @@ router.get('/radiographies/:patientId', async (req, res) => {
   }
 });
 
+// DELETE /api/patients/radiographies/:id - Supprimer une radiographie
 router.delete('/radiographies/:id', async (req, res) => {
   try {
     const result = await pool.query('SELECT image_url FROM radiographies WHERE id = $1', [req.params.id]);
@@ -315,6 +498,7 @@ router.delete('/radiographies/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/patients/:id - Supprimer un patient
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
