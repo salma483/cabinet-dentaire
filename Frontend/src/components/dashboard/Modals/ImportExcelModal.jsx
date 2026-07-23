@@ -16,10 +16,14 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
   const [selectedSheet, setSelectedSheet] = useState('');
   const [workbookData, setWorkbookData] = useState(null);
   const [hasHeaders, setHasHeaders] = useState(true);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const fileInputRef = useRef(null);
 
   const token = localStorage.getItem('token');
-  const axiosConfig = { headers: { Authorization: `Bearer ${token}` } };
+  const axiosConfig = { 
+    headers: { Authorization: `Bearer ${token}` },
+    timeout: 30000, // 30 secondes par requête
+  };
 
   const downloadTemplate = () => {
     const template = [
@@ -396,7 +400,9 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
     return 'non_paye';
   };
 
-  // ✅ IMPORTATION : CONTINUE MÊME EN CAS D'ERREUR
+  // ============================================================
+  // ✅ IMPORTATION PAR LOTS (BATCH) avec gestion des erreurs réseau
+  // ============================================================
   const handleImport = async () => {
     if (previewData.length === 0) {
       toast.error('Aucune donnée à importer');
@@ -407,37 +413,89 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
     let successCount = 0;
     let errorCount = 0;
     const errors = [];
+    
+    // 📦 Taille des lots
+    const BATCH_SIZE = 30; // Réduit à 30 pour éviter les timeouts sur Render
+    const totalBatches = Math.ceil(previewData.length / BATCH_SIZE);
+    
+    setImportProgress({ current: 0, total: previewData.length });
 
-    const toastId = toast.loading(`Importation en cours... 0/${previewData.length}`);
+    const toastId = toast.loading(
+      `Importation en cours... Lot 0/${totalBatches} - 0/${previewData.length} patients`
+    );
 
     try {
-      for (let i = 0; i < previewData.length; i++) {
-        const patient = previewData[i];
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const start = batchIndex * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, previewData.length);
+        const batch = previewData.slice(start, end);
         
-        if (i % 50 === 0) {
-          toast.loading(`Importation en cours... ${i}/${previewData.length}`, { id: toastId });
-        }
+        // Mettre à jour la progression
+        setImportProgress({ current: end, total: previewData.length });
         
-        try {
-          await axios.post(
-            `${API_CONFIG.DASHBOARD_API}/patients`,
-            {
-              full_name: patient.full_name.toString().trim().substring(0, 255),
-              birth_date: patient.birth_date || null,
-              phone: patient.phone || null,
-              address: patient.address || null,
-              paiement_status: patient.paiement_status || 'non_paye',
-            },
-            axiosConfig
-          );
-          successCount++;
-        } catch (error) {
-          errorCount++;
-          errors.push({
-            row: i + 1,
-            name: patient.full_name,
-            error: error.response?.data?.error || error.message,
-          });
+        toast.loading(
+          `Importation lot ${batchIndex + 1}/${totalBatches}... ${end}/${previewData.length} patients`, 
+          { id: toastId }
+        );
+        
+        // Traiter le lot en parallèle (mais avec limite de concurrence)
+        const batchPromises = batch.map(async (patient, index) => {
+          const rowIndex = start + index + 1;
+          
+          // 🔄 Tentatives pour chaque patient
+          let retries = 0;
+          const maxRetries = 2;
+          
+          while (retries <= maxRetries) {
+            try {
+              await axios.post(
+                `${API_CONFIG.DASHBOARD_API}/patients`,
+                {
+                  full_name: patient.full_name.toString().trim().substring(0, 255),
+                  birth_date: patient.birth_date || null,
+                  phone: patient.phone || null,
+                  address: patient.address || null,
+                  paiement_status: patient.paiement_status || 'non_paye',
+                },
+                {
+                  ...axiosConfig,
+                  timeout: 15000, // 15 secondes par requête
+                }
+              );
+              successCount++;
+              return { success: true };
+            } catch (error) {
+              const isNetworkError = error.code === 'ERR_NETWORK' || 
+                                    error.code === 'ERR_NAME_NOT_RESOLVED' ||
+                                    error.code === 'ERR_INTERNET_DISCONNECTED' ||
+                                    error.code === 'ERR_NETWORK_CHANGED' ||
+                                    error.message?.includes('timeout');
+              
+              if (isNetworkError && retries < maxRetries) {
+                retries++;
+                console.log(`🔄 Réessai ${retries}/${maxRetries} pour ${patient.full_name}`);
+                await new Promise(resolve => setTimeout(resolve, 2000 * retries));
+                continue;
+              }
+              
+              // Erreur définitive
+              errorCount++;
+              errors.push({
+                row: rowIndex,
+                name: patient.full_name,
+                error: error.response?.data?.error || error.message || error.code,
+              });
+              return { success: false, error: error };
+            }
+          }
+        });
+        
+        // Attendre que le lot soit terminé
+        await Promise.allSettled(batchPromises);
+        
+        // ✅ Petite pause entre les lots pour éviter la surcharge du serveur
+        if (batchIndex < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
@@ -456,10 +514,11 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
 
     } catch (error) {
       toast.dismiss(toastId);
-      console.error('Erreur d\'import:', error);
+      console.error('❌ Erreur d\'import:', error);
       toast.error('Erreur lors de l\'importation');
     } finally {
       setIsLoading(false);
+      setImportProgress({ current: 0, total: 0 });
     }
   };
 
@@ -472,6 +531,7 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
     setSelectedSheet('');
     setWorkbookData(null);
     setHasHeaders(true);
+    setImportProgress({ current: 0, total: 0 });
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -480,6 +540,44 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
   const handleClose = () => {
     resetImport();
     setShow(false);
+  };
+
+  // Barre de progression
+  const renderProgressBar = () => {
+    const { current, total } = importProgress;
+    if (total === 0 || !isLoading) return null;
+    
+    const percentage = Math.round((current / total) * 100);
+    
+    return (
+      <div style={{ margin: '15px 0' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          fontSize: '13px',
+          color: '#6c757d',
+          marginBottom: '5px'
+        }}>
+          <span>Progression</span>
+          <span>{percentage}% ({current}/{total})</span>
+        </div>
+        <div style={{
+          width: '100%',
+          height: '8px',
+          background: '#e9ecef',
+          borderRadius: '4px',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            width: `${percentage}%`,
+            height: '100%',
+            background: 'linear-gradient(90deg, #667eea, #764ba2)',
+            transition: 'width 0.5s ease',
+            borderRadius: '4px',
+          }} />
+        </div>
+      </div>
+    );
   };
 
   if (!show) return null;
@@ -753,6 +851,8 @@ const ImportExcelModal = ({ show, setShow, onImportSuccess }) => {
                   </button>
                 </div>
               </div>
+
+              {renderProgressBar()}
 
               <div style={{
                 overflow: 'auto',
